@@ -40,7 +40,7 @@ export function instantiateTemplate(t: ProjectTemplate, overrides: Partial<Proje
       name: f.name,
       description: f.description ?? '',
       status: f.status ?? 'Not started',
-      colour: f.colour ?? PALETTE[(i + 4) % PALETTE.length],
+      colour: f.colour ?? PALETTE[i % PALETTE.length],
       ownerIds: (f.owners ?? []).map(memberId).filter((id): id is string => !!id),
       order: i,
     }),

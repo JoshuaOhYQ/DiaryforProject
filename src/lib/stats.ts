@@ -1,5 +1,6 @@
 /** Totals over log entries: per member, per feature, and the member × feature matrix. */
 import type { Entry, ISODate } from '../types.ts';
+import { addDays, diffDays, startOfWeek } from './dates.ts';
 
 export interface Tally {
   hours: number;
@@ -38,6 +39,38 @@ export interface Matrix {
   total: Tally;
   /** Largest cell, for shading. */
   maxHours: number;
+}
+
+/** The start dates of the `count` weeks ending with the week containing `today`. */
+export function recentWeeks(today: ISODate, count: number, weekStartsOn: 0 | 1): ISODate[] {
+  const current = startOfWeek(today, weekStartsOn);
+  return Array.from({ length: count }, (_, i) => addDays(current, (i - count + 1) * 7));
+}
+
+export interface WeekCell {
+  weekStart: ISODate;
+  hours: number;
+  count: number;
+}
+
+/** Hours and entry counts per member for each week. Every member gets a value for every week. */
+export function weeklyByMember(entries: Entry[], memberIds: string[], weeks: ISODate[], weekStartsOn: 0 | 1): Map<string, WeekCell[]> {
+  const index = new Map(weeks.map((w, i) => [w, i]));
+  const out = new Map(memberIds.map((id) => [id, weeks.map((weekStart) => ({ weekStart, hours: 0, count: 0 }))]));
+  for (const e of entries) {
+    const i = index.get(startOfWeek(e.date, weekStartsOn));
+    const row = out.get(e.authorId);
+    if (i === undefined || !row) continue;
+    row[i].hours = Math.round((row[i].hours + e.hours) * 100) / 100;
+    row[i].count++;
+  }
+  return out;
+}
+
+/** Days since each member's most recent entry (null if they have never logged). */
+export function daysSinceLastEntry(entries: Entry[], memberIds: string[], today: ISODate): Map<string, number | null> {
+  const last = tallyBy(entries, (e) => e.authorId);
+  return new Map(memberIds.map((id) => [id, last.get(id)?.last ? diffDays(last.get(id)!.last!, today) : null]));
 }
 
 /** Who did what: hours and entry counts for every member × feature pair. */

@@ -3,7 +3,8 @@ import { Diamond, FileDown, Image as ImageIcon, Plus } from 'lucide-react';
 import type { Task } from '../types.ts';
 import { useProject } from '../app/context.ts';
 import { navigate, useRoute } from '../app/router.ts';
-import { LIGHT_COLORS } from '../app/theme.ts';
+import { LIGHT_COLORS, useResolvedTheme } from '../app/theme.ts';
+import { displayColour, NEUTRAL } from '../lib/colours.ts';
 import { toast } from '../app/toast.tsx';
 import { newTask, store } from '../data/index.ts';
 import { Swatch } from '../components/Chips.tsx';
@@ -56,10 +57,12 @@ export function GanttPage() {
   const range = useMemo(() => chartRange(data.tasks, actuals, today, zoom, data.project.weekStartsOn), [data.tasks, actuals, today, zoom, data.project.weekStartsOn]);
   const scale = useMemo(() => makeScale(range.start, range.end, zoom), [range, zoom]);
 
-  const colourOf = (t: Task) => {
-    if (colourBy === 'member') return data.memberById.get(t.assigneeIds[0] ?? '')?.colour ?? '#8a94a3';
-    return (t.featureId && data.featureById.get(t.featureId)?.colour) || '#8a94a3';
+  const theme = useResolvedTheme();
+  const baseColourOf = (t: Task) => {
+    if (colourBy === 'member') return data.memberById.get(t.assigneeIds[0] ?? '')?.colour ?? NEUTRAL;
+    return (t.featureId && data.featureById.get(t.featureId)?.colour) || NEUTRAL;
   };
+  const colourOf = (t: Task) => displayColour(baseColourOf(t), theme);
 
   const select = (id: string | null) => navigate('/gantt', { task: id }, true);
   const selected = selectedId ? data.taskById.get(selectedId) : undefined;
@@ -85,7 +88,7 @@ export function GanttPage() {
     weekStartsOn: data.project.weekStartsOn,
     today,
     colours: LIGHT_COLORS,
-    colourOf,
+    colourOf: baseColourOf,
     actuals,
     slips,
     showActual,
