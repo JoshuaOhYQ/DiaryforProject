@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "projects": [
+    {
+      "id": "mupbblsq-00amwv",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "name": "PIPER — Dementia-Assistive Robot",
+      "description": "A stationary dementia-assistive robot.",
+      "organisation": "Sunway University",
+      "course": "IDP1 — Electronic & Electrical Engineering",
+      "group": "Group 2",
+      "supervisor": "Dr. Chia Wai Chong",
+      "startDate": "",
+      "repoUrl": "https://github.com/JoshuaOhYQ/Dementia-Assistive-Robot-Piper",
+      "entryTypes": [
+        "Design",
+        "Build",
+        "Test",
+        "Debug",
+        "Research",
+        "Meeting",
+        "Writing"
+      ],
+      "weekStartsOn": 1
+    }
+  ],
+  "members": [
+    {
+      "id": "mupbblst-001brg",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Oh Yu Qiao",
+      "role": "",
+      "colour": "#2a78d6",
+      "archived": false
+    },
+    {
+      "id": "mupbblst-01aja3",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Tay Shuen Min",
+      "role": "",
+      "colour": "#eb6834",
+      "archived": false
+    },
+    {
+      "id": "mupbblst-02to20",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Jordan Douglas Su E-Wern",
+      "role": "",
+      "colour": "#1baf7a",
+      "archived": false
+    },
+    {
+      "id": "mupbblst-030wpa",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Puteri Amelya Dania",
+      "role": "",
+      "colour": "#eda100",
+      "archived": false
+    }
+  ],
+  "features": [
+    {
+      "id": "mupbblst-04xvnr",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Smart Home (MQTT)",
+      "description": "MQTT broker, ESP32 house node and appliance control, with safety checks between the AI and the appliances.",
+      "status": "In progress",
+      "ownerIds": [
+        "mupbblst-001brg"
+      ],
+      "colour": "#2a78d6",
+      "order": 0
+    },
+    {
+      "id": "mupbblst-0526me",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Voice (STT/TTS)",
+      "description": "",
+      "status": "Not started",
+      "ownerIds": [],
+      "colour": "#eb6834",
+      "order": 1
+    },
+    {
+      "id": "mupbblst-067grb",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "LLM backend",
+      "description": "",
+      "status": "Not started",
+      "ownerIds": [],
+      "colour": "#1baf7a",
+      "order": 2
+    },
+    {
+      "id": "mupbblst-07iyjn",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Robot hardware (ESP32/sensors)",
+      "description": "",
+      "status": "Not started",
+      "ownerIds": [],
+      "colour": "#eda100",
+      "order": 3
+    },
+    {
+      "id": "mupbblst-08s3n7",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Diary/Memory",
+      "description": "",
+      "status": "Not started",
+      "ownerIds": [],
+      "colour": "#e87ba4",
+      "order": 4
+    },
+    {
+      "id": "mupbblst-092ksq",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Safety & Alerts",
+      "description": "",
+      "status": "Not started",
+      "ownerIds": [],
+      "colour": "#008300",
+      "order": 5
+    },
+    {
+      "id": "mupbblsu-00b7sn",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Report",
+      "description": "",
+      "status": "Not started",
+      "ownerIds": [],
+      "colour": "#4a3aa7",
+      "order": 6
+    }
+  ],
+  "tasks": [
+    {
+      "id": "mupbblsu-01xil7",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "name": "Hardware deadline",
+      "featureId": "mupbblst-07iyjn",
+      "assigneeIds": [],
+      "start": "2026-10-09",
+      "end": "2026-10-09",
+      "progress": 0,
+      "dependsOn": [],
+      "milestone": true,
+      "notes": "From the smart-home work log: order the second ESP32 before the 9 October hardware deadline."
+    }
+  ],
+  "entries": [
+    {
+      "id": "mupbbltb-00mj93",
+      "createdAt": "2026-10-01T09:09:11.833Z",
+      "updatedAt": "2026-10-01T09:09:11.833Z",
+      "projectId": "mupbblsq-00amwv",
+      "date": "2026-09-08",
+      "authorId": "mupbblst-001brg",
+      "featureId": "mupbblst-04xvnr",
+      "taskId": null,
+      "hours": 0,
+      "type": "Build",
+      "did": "**What this part of the robot does**\n\nPIPER is meant to control things in the house. If the person says *\"turn on the living room light\"*, a light should switch on. If they leave the stove on and walk away, PIPER should notice and switch it off.\n\nMy job was to build the part that carries those commands from the robot's brain to the appliances in the house.\n\n**What I built**\n\n| Piece | What it does |\n|---|---|\n| **MQTT broker** (Mosquitto) | The post office in the middle. Everything sends and receives messages through it. |\n| **House node** (ESP32 program) | Listens for commands and switches the lights, fan and stove. Written but not yet flashed to the board. |\n| **Virtual house** (Python) | A software copy of that ESP32. Behaves exactly the same, so I can test with no hardware. |\n| **Backend** (Python) | The robot's brain. Turns what the person said into a command and sends it. |\n| **Safety checker** | Sits between the AI and the appliances. Blocks anything unsafe or invalid. |\n| **Rules engine** | The automatic behaviours — night lighting, stove warnings, lights left on in empty rooms. |\n| **Diary** (SQLite) | Records what happened, so PIPER can answer *\"did I take my medicine?\"* later. |\n| **Dashboard** (web page) | A screen showing the house live. For the demo video. |\n\n**How a command travels**\n\n```\nPerson speaks\n   ↓\nSpeech turned into text\n   ↓\nGemini decides what they meant, and replies in a fixed format\n   ↓\nBackend checks the request is allowed          ← safety happens here\n   ↓\nCommand sent through the MQTT broker\n   ↓\nESP32 in the house switches the light\n   ↓\nESP32 sends back \"the light is now on\"\n   ↓\nOnly then does PIPER say \"the light is on\"\n```\n\nThe last two lines matter. PIPER does not say a light is on just because it sent the command. It waits for the light itself to confirm. If nothing comes back, it tells the person honestly that it could not do it.\n\n**Safety decisions**\n\nThese were deliberate, and they are the parts I would explain in a viva.\n\n**The AI is never trusted.** Gemini is a language model, and language models make things up. So everything it asks for is checked first: the device must be one we actually have, the action must be one that device allows, and no more than three commands can come from one sentence. Anything else is thrown away and written to a log.\n\n**PIPER can never switch the stove ON.** It can only switch it off. This is blocked in two separate places — in the backend, and again in the ESP32 itself. If one has a bug, the other still stops it. A robot for someone with dementia should never be able to turn on a heating element.\n\n**If the house node dies, PIPER admits it.** The ESP32 tells the broker in advance: *\"if I disappear, tell everyone I am offline.\"* So when it loses power, PIPER says *\"I can't reach the lights at the moment\"* instead of confidently lying to someone who cannot check for themselves.",
+      "problems": "**The problem I had to work around**\n\nOur design uses **two ESP32 boards**: one inside the robot, and one in the house that switches the appliances. We only have **one board** right now, and we do not have the relays, the microphone, or the mmWave sensor yet.\n\nSo instead of waiting for parts, I built the system so that every piece can be swapped between a **simulated** version and a **real** version without changing anything else. That way the work could start now and the real hardware just drops in later.\n\n**Problems I hit, and how I solved them**\n\n- **The tests crashed on Windows.** The test file used a Linux folder path (`/tmp`) that does not exist on Windows.\n- **Everything said \"connected\" but nothing worked.** The dashboard connected to the broker, the broker accepted it, and no messages ever arrived. It turned out there were **two brokers running at once** — one I started by hand, and one Windows had started automatically. Different programs were connecting to different brokers, so they never saw each other's messages. Nothing reported an error because, from each program's point of view, nothing was wrong.\n- **Wokwi would not run.** Wokwi is an online ESP32 simulator. It kept returning \"server busy\" — their free build servers were full.",
+      "fixes": "- **The tests crashed on Windows:** Fixed by asking Python for the correct temporary folder for whichever computer it is running on. Now it works on all our machines.\n- **Everything said \"connected\" but nothing worked:** I found it by comparing the process IDs on each port. Fix: stop the automatic one so only a single broker runs. This was the most useful thing I learned today. Every part of a system can report that it is healthy while the system as a whole does nothing. That is exactly why the design waits for the appliance to confirm, instead of assuming.\n- **Wokwi would not run:** This was only ever a way to test the ESP32 program without a board, and we have a board, so I skipped it and will test on the real ESP32 instead.",
+      "result": "**Testing**\n\nI wrote 19 automated tests. All 19 pass.\n\nThey check:\n\n- A command is sent, acted on, and confirmed back\n- The system knows the state of every appliance after a restart\n- Both stove blocks work\n- A made-up device name from the AI is thrown away, not sent\n- The night lighting rule turns the light on when someone walks about at night\n- The stove rule gives a spoken warning, then cuts the power, then alerts the caregiver\n\nThe tests run in about 19 seconds and start their own simulated house, so anyone on the team can run them.\n\n**Where the work stands**\n\n**Working now:**\n\n- Broker installed and configured\n- Full command path, tested end to end\n- Both safety blocks\n- All three automatic rules\n- The diary\n- 19 passing tests\n\n**Written but not yet run on hardware:**\n\n- The ESP32 program. It is finished; it needs the board, four LEDs and resistors.\n\n**Not started (other people's parts, or later):**\n\n- Whisper speech-to-text — replaces typing on the keyboard\n- Piper text-to-speech — replaces printing on screen\n- Real Gemini — one setting switches it on\n- Telegram alerts — the same function the fall detection needs\n- Broker password. Right now the broker accepts anyone on the network. This must be turned on before the demo, because our report says the system keeps data private.\n\n**Note for the report**\n\nBe clear about which results came from simulation and which came from hardware.\n\nSimulation proved the message design, the safety blocks, the rules and the timing. It cannot prove relay switching, mains safety, sensor accuracy, WiFi range or power use. Those still need bench tests. Saying so plainly is better than blurring it.",
+      "next": "1. Flash the ESP32 and wire four LEDs, so the same commands switch real lights\n2. Turn on the broker password\n3. Measure how long a command takes from start to finish, for the report\n4. Order the second ESP32 before the 9 October hardware deadline",
+      "tags": [
+        "imported"
+      ],
+      "links": [],
+      "attachments": []
+    }
+  ],
+  "weekNotes": [],
+  "tombstones": []
+}
