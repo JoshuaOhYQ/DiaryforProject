@@ -1,0 +1,7 @@
+# When two people both change the log book, merge record-by-record instead of
+# producing a JSON conflict. The driver is registered by `npm install`
+# (scripts/setup-git.mjs). Without it Git falls back to a normal text merge.
+data/logbook.json merge=logbook
+
+# Screenshots are binary.
+data/assets/** binary
