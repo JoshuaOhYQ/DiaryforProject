@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
-import { Monitor, Moon, NotebookPen, Plus, ScrollText, Settings, Sun } from 'lucide-react';
+import { Monitor, Moon, NotebookPen, Plus, ScrollText, Settings, Sun, Users } from 'lucide-react';
 import type { Entry } from '../types.ts';
 import { newEntry, selectProject, store, useSaveStatus, useWorkspace, type ProjectData, type SaveStatus } from '../data/index.ts';
 import { todayISO } from '../lib/dates.ts';
@@ -9,6 +9,7 @@ import { Modal } from '../components/Modal.tsx';
 import { NewProjectDialog } from '../components/NewProjectDialog.tsx';
 import { EntriesPage } from '../pages/EntriesPage.tsx';
 import { SettingsPage } from '../pages/SettingsPage.tsx';
+import { TeamPage } from '../pages/TeamPage.tsx';
 import { WelcomePage } from '../pages/WelcomePage.tsx';
 import { AppActionsContext, EntryEditorContext, ProjectContext, type AppActions, type EntryEditor } from './context.ts';
 import { href, navigate, useRoute } from './router.ts';
@@ -25,6 +26,7 @@ interface Page {
 
 const PAGES: Page[] = [
   { path: '/log', label: 'Log', icon: ScrollText, component: EntriesPage },
+  { path: '/team', label: 'Team', icon: Users, component: TeamPage },
   { path: '/settings', label: 'Settings', icon: Settings, component: SettingsPage },
 ];
 
