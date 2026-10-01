@@ -1464,6 +1464,59 @@ dialog.modal::backdrop {
   margin: 0;
 }
 
+/* ---------- Log book -------------------------------------------------------- */
+.logbook-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+  padding: 0.65rem 0.8rem;
+  margin-bottom: 1rem;
+}
+.week-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 150px;
+  line-height: 1.25;
+}
+.paper {
+  background: #fff;
+  color: #1d232b;
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 2.2rem 2.4rem;
+  border-radius: 4px;
+  box-shadow: var(--shadow-lg);
+  color-scheme: light;
+}
+@media (max-width: 640px) {
+  .paper {
+    padding: 1.2rem 1rem;
+    margin: 0 -0.5rem;
+  }
+}
+.paper .narrative-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
+  margin: 0.2rem 0 0.4rem;
+}
+.paper .narrative-editor textarea {
+  width: 100%;
+  background: #fbfcfd;
+  color: #1d232b;
+  border-color: #c3cbd4;
+  font-size: 0.95em;
+}
+.paper .narrative-editor .btn {
+  background: #fff;
+  color: #1d232b;
+  border-color: #c3cbd4;
+}
+
 /* ---------- Settings / welcome ---------------------------------------------- */
 .settings-grid {
   display: grid;
