@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
-import { BookOpenText, CalendarRange, Monitor, Moon, NotebookPen, Plus, ScrollText, Settings, Sun, Users } from 'lucide-react';
+import { BookOpenText, CalendarRange, LayoutDashboard, Monitor, Moon, NotebookPen, Plus, ScrollText, Settings, Sun, Users } from 'lucide-react';
 import type { Entry } from '../types.ts';
 import { newEntry, selectProject, store, useSaveStatus, useWorkspace, type ProjectData, type SaveStatus } from '../data/index.ts';
 import { todayISO } from '../lib/dates.ts';
@@ -7,6 +7,7 @@ import { getPref, setPref } from '../lib/prefs.ts';
 import { EntryForm } from '../components/EntryForm.tsx';
 import { Modal } from '../components/Modal.tsx';
 import { NewProjectDialog } from '../components/NewProjectDialog.tsx';
+import { DashboardPage } from '../pages/DashboardPage.tsx';
 import { EntriesPage } from '../pages/EntriesPage.tsx';
 import { GanttPage } from '../pages/GanttPage.tsx';
 import { LogbookPage } from '../pages/LogbookPage.tsx';
@@ -27,6 +28,7 @@ interface Page {
 }
 
 const PAGES: Page[] = [
+  { path: '/', label: 'Dashboard', icon: LayoutDashboard, component: DashboardPage },
   { path: '/log', label: 'Log', icon: ScrollText, component: EntriesPage },
   { path: '/gantt', label: 'Gantt', icon: CalendarRange, component: GanttPage, wide: true },
   { path: '/team', label: 'Team', icon: Users, component: TeamPage },
@@ -34,7 +36,7 @@ const PAGES: Page[] = [
   { path: '/settings', label: 'Settings', icon: Settings, component: SettingsPage },
 ];
 
-const HOME = '/log';
+const HOME = '/';
 
 function isTyping(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && !!target.closest('input, textarea, select, [contenteditable="true"]');

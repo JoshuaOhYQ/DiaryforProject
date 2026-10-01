@@ -1,6 +1,7 @@
 /** Rows, time scale and header ticks for the Gantt chart. */
 import type { Feature, ISODate, Task } from '../types.ts';
 import type { Actuals } from './ganttMath.ts';
+import { NEUTRAL } from '../lib/colours.ts';
 import {
   addDays,
   addMonths,
@@ -34,7 +35,7 @@ export function buildRows(tasks: Task[], features: Feature[], onlyFeatureId: str
   const rows: GanttRow[] = [];
   const groups: { id: string; label: string; colour: string }[] = [
     ...features.map((f) => ({ id: f.id, label: f.name, colour: f.colour })),
-    { id: NO_FEATURE_GROUP, label: 'No feature', colour: '#8a94a3' },
+    { id: NO_FEATURE_GROUP, label: 'No feature', colour: NEUTRAL },
   ];
   const known = new Set(features.map((f) => f.id));
   for (const g of groups) {

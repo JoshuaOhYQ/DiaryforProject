@@ -18,6 +18,7 @@ import type {
   Workspace,
 } from '../types.ts';
 import { isISODate } from '../lib/dates.ts';
+import { PALETTE_LIGHT } from '../lib/colours.ts';
 
 export const SCHEMA_VERSION = 1 as const;
 
@@ -27,8 +28,8 @@ export const DEFAULT_ENTRY_TYPES = ['Design', 'Build', 'Test', 'Debug', 'Researc
 
 export const FEATURE_STATUSES: FeatureStatus[] = ['Not started', 'In progress', 'Blocked', 'Done'];
 
-/** Distinct colours that read well on light and dark backgrounds. */
-export const PALETTE = ['#2f7fc1', '#d0556d', '#2e9a6b', '#d4892a', '#8a63c9', '#1f9db0', '#c4604a', '#6f7f8f', '#b0478f', '#5f9a2f'];
+/** Default colours, in colour-blind-safe order (see lib/colours.ts). */
+export const PALETTE = PALETTE_LIGHT;
 
 export function emptyWorkspace(): Workspace {
   return { schemaVersion: SCHEMA_VERSION, projects: [], members: [], features: [], tasks: [], entries: [], weekNotes: [], tombstones: [] };

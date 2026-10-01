@@ -1,8 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { newEntry } from '../data/factories.ts';
-import { buildMatrix, NO_FEATURE, tallyBy } from './stats.ts';
+import { buildMatrix, daysSinceLastEntry, NO_FEATURE, recentWeeks, tallyBy, weeklyByMember } from './stats.ts';
 
 const e = (authorId: string, featureId: string | null, hours: number, date = '2026-10-01') => newEntry('p', { authorId, featureId, hours, date });
+
+describe('dashboard stats', () => {
+  const entries = [e('ana', null, 2, '2026-09-21'), e('ana', null, 1, '2026-09-27'), e('ana', null, 3, '2026-10-01'), e('ben', null, 4, '2026-08-01')];
+
+  it('lists recent week starts, oldest first', () => {
+    expect(recentWeeks('2026-10-01', 3, 1)).toEqual(['2026-09-14', '2026-09-21', '2026-09-28']);
+  });
+
+  it('adds hours per member per week, with zeros for quiet weeks', () => {
+    const weeks = recentWeeks('2026-10-01', 3, 1);
+    const m = weeklyByMember(entries, ['ana', 'ben', 'cat'], weeks, 1);
+    expect(m.get('ana')!.map((w) => w.hours)).toEqual([0, 3, 3]);
+    expect(m.get('ana')![1].count).toBe(2);
+    expect(m.get('ben')!.map((w) => w.hours)).toEqual([0, 0, 0]);
+    expect(m.get('cat')!.map((w) => w.hours)).toEqual([0, 0, 0]);
+  });
+
+  it('counts days since each member last logged', () => {
+    const d = daysSinceLastEntry(entries, ['ana', 'ben', 'cat'], '2026-10-04');
+    expect(d.get('ana')).toBe(3);
+    expect(d.get('ben')).toBe(64);
+    expect(d.get('cat')).toBeNull();
+  });
+});
+
 
 describe('who-did-what matrix', () => {
   const entries = [e('ana', 'mqtt', 2), e('ana', 'mqtt', 1.5, '2026-10-03'), e('ana', null, 1), e('ben', 'voice', 3), e('ben', 'mqtt', 0.25)];

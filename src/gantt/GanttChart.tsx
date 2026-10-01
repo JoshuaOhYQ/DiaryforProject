@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { Task } from '../types.ts';
 import type { ProjectData } from '../data/index.ts';
-import { useThemeColors } from '../app/theme.ts';
+import { useResolvedTheme, useThemeColors } from '../app/theme.ts';
+import { displayColour, NEUTRAL } from '../lib/colours.ts';
 import { Swatch } from '../components/Chips.tsx';
 import { cascadeDependents, moveTask, resizeTask, type Actuals, type Slippage } from './ganttMath.ts';
 import { GanttSvg, type DragMode } from './GanttSvg.tsx';
@@ -40,6 +41,7 @@ function applyDrag(d: Drag, dayW: number): Task {
 
 export function GanttChart(p: Props) {
   const colours = useThemeColors();
+  const theme = useResolvedTheme();
   const scroller = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
 
@@ -127,7 +129,7 @@ export function GanttChart(p: Props) {
                 {r.task.assigneeIds.slice(0, 3).map((id) => {
                   const m = p.data.memberById.get(id);
                   return (
-                    <span key={id} className="avatar" style={{ background: m?.colour ?? '#999' }} title={m?.name}>
+                    <span key={id} className="avatar" style={{ background: displayColour(m?.colour ?? NEUTRAL, theme) }} title={m?.name}>
                       {(m?.name ?? '?')
                         .split(/\s+/)
                         .slice(0, 2)

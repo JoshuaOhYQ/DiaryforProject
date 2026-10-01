@@ -4,7 +4,8 @@ import type { Entry, Feature, Member } from '../types.ts';
 import { useProject } from '../app/context.ts';
 import { href, navigate, useRoute } from '../app/router.ts';
 import { toast } from '../app/toast.tsx';
-import { FEATURE_STATUSES, newFeature, newMember, PALETTE, store, type ProjectData } from '../data/index.ts';
+import { FEATURE_STATUSES, newFeature, newMember, store, type ProjectData } from '../data/index.ts';
+import { nextColour } from '../lib/colours.ts';
 import { PillToggles, Swatch } from '../components/Chips.tsx';
 import { CommitInput, CommitTextarea } from '../components/CommitInput.tsx';
 import { EntryCard } from '../components/EntryCard.tsx';
@@ -192,8 +193,7 @@ function MembersView() {
 
   function add() {
     if (!name.trim()) return;
-    const used = new Set(data.members.map((m) => m.colour));
-    store.put('members', newMember(data.project.id, { name: name.trim(), colour: PALETTE.find((c) => !used.has(c)) ?? PALETTE[data.members.length % PALETTE.length] }));
+    store.put('members', newMember(data.project.id, { name: name.trim(), colour: nextColour(data.members.map((m) => m.colour)) }));
     setName('');
   }
 
@@ -295,8 +295,7 @@ function FeaturesView() {
 
   function add() {
     if (!name.trim()) return;
-    const used = new Set(data.features.map((f) => f.colour));
-    store.put('features', newFeature(data.project.id, { name: name.trim(), colour: PALETTE.find((c) => !used.has(c)) ?? PALETTE[data.features.length % PALETTE.length], order: data.features.length }));
+    store.put('features', newFeature(data.project.id, { name: name.trim(), colour: nextColour(data.features.map((f) => f.colour)), order: data.features.length }));
     setName('');
   }
 

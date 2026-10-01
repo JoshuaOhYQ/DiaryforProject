@@ -1,7 +1,10 @@
 import { useProject } from '../app/context.ts';
+import { useResolvedTheme } from '../app/theme.ts';
+import { displayColour } from '../lib/colours.ts';
 
 export function Swatch({ colour, round }: { colour: string; round?: boolean }) {
-  return <span className={`swatch${round ? ' round' : ''}`} style={{ background: colour }} aria-hidden="true" />;
+  const theme = useResolvedTheme();
+  return <span className={`swatch${round ? ' round' : ''}`} style={{ background: displayColour(colour, theme) }} aria-hidden="true" />;
 }
 
 export function MemberChip({ id }: { id: string }) {
