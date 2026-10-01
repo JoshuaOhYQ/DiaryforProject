@@ -1,3 +1,6 @@
+# Same line endings on every computer, so the app's saved JSON matches what Git checks out.
+* text=auto eol=lf
+
 # When two people both change the log book, merge record-by-record instead of
 # producing a JSON conflict. The driver is registered by `npm install`
 # (scripts/setup-git.mjs). Without it Git falls back to a normal text merge.
