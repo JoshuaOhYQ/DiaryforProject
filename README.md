@@ -38,6 +38,23 @@ and in `data/logbook.json`, which you commit to Git like any other file.
    npm run dev      # open http://localhost:5173
    ```
 
+**If `node` or `npm` is "not recognized"** after installing Node, the terminal has an old PATH.
+First close all terminals (and VS Code) and open a new one. If that doesn't help, check that Node
+is installed and refresh the PATH in the current PowerShell window:
+
+```powershell
+Test-Path "C:\Program Files\nodejs\node.exe"     # True = installed
+$env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+node --version
+```
+
+If it says `False`, Node isn't installed: run the `winget` command above (or use the installer
+from nodejs.org with "Add to PATH" ticked) and open a new terminal. Signing out of Windows and
+back in also fixes a stale PATH.
+
+If `npm install` says scripts are disabled, run
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once and retry.
+
 That's it. While `npm run dev` is running, **every change is written to `data/logbook.json`**
 (and screenshots to `data/assets/`). The dot in the top bar shows when it last saved.
 
