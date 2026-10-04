@@ -1,9 +1,10 @@
 # Publishes the app to GitHub Pages on every push to main.
 # One-time setup: repo Settings → Pages → Source: "GitHub Actions".
-# The committed data/logbook.json is published with the site, encrypted with the admin password
-# in the LOGBOOK_PASSWORD secret (Settings → Secrets and variables → Actions → New repository secret).
-# The site asks for that password before showing anything. Set LOGBOOK_PUBLISH_DATA to 'false'
-# below to publish an empty app instead.
+# The log book is committed encrypted (`npm run lock`: data/lock.json + .enc files) and published
+# as it is; the site asks for the team password before showing anything. If the repo holds a plain
+# data/logbook.json instead, the deploy encrypts it with the LOGBOOK_PASSWORD repository secret,
+# and refuses to publish when neither is there. Set LOGBOOK_PUBLISH_DATA to 'false' below to
+# publish an empty app instead.
 name: Deploy to GitHub Pages
 
 on:
@@ -31,10 +32,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - name: Check the admin password is set
+      - name: Check the log book will be published encrypted
         run: |
-          if [ -z "$LOGBOOK_PASSWORD" ]; then
-            echo "::error::Add a LOGBOOK_PASSWORD repository secret so the published log book is password-protected."
+          if [ ! -f data/lock.json ] && [ -z "$LOGBOOK_PASSWORD" ]; then
+            echo "::error::Run 'npm run lock' and commit data/, or add a LOGBOOK_PASSWORD repository secret."
             exit 1
           fi
         env:

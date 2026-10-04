@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc -p .",
     "seed": "node scripts/seed.ts",
+    "lock": "node scripts/lock.ts",
     "prepare": "node scripts/setup-git.mjs"
   },
   "dependencies": {

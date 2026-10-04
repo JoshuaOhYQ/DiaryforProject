@@ -4,18 +4,25 @@
  *   GET  /data/...                 serve data/logbook.json and data/assets/* (dev only; the build copies them)
  *   GET  /__logbook/ping           tells the app that file saving is available
  *   PUT  /__logbook/save           body = workspace JSON  -> data/logbook.json
+ *   PUT  /__logbook/save-sealed    body = encrypted line  -> data/logbook.json.enc
  *   PUT  /__logbook/asset/<name>   body = file bytes      -> data/assets/<name>
  *
  * This only exists while `npm run dev` is running, so the deployed site stays a static site.
  *
- * With `password` set, the build publishes data/ encrypted (`<file>.enc` + `lock.json`, see
- * src/lib/lock.ts) and the site asks for the password before showing anything.
+ * When data/lock.json exists the log book is encrypted in the repo (src/data/sealed.ts): the
+ * browser encrypts before saving, and this server refuses to read or write plain files. With
+ * LOGBOOK_PASSWORD in .env.local it also checks that each write really uses the team password.
+ *
+ * The build publishes a locked data/ folder as it is (encrypted). An unlocked one is published
+ * plain, or encrypted on the fly when `password` is set.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
-import { createLock, encryptBytes, ENC_SUFFIX, LOCK_FILE } from './src/lib/lock.ts';
+import { createLock, decryptBytes, encryptBytes, ENC_SUFFIX, LOCK_FILE } from './src/lib/lock.ts';
+import { looksSealed, openWorkspaceText, SEALED_WORKSPACE_FILE, sealWorkspaceText, WORKSPACE_FILE } from './src/data/sealed.ts';
+import { dataKey, isLocked } from './scripts/dataLock.ts';
 
 interface Options {
   dataDir?: string;
@@ -54,6 +61,22 @@ export function logbookFiles(options: Options = {}): Plugin {
       const dataDir = path.resolve(root, dataDirName);
       const assetsDir = path.join(dataDir, 'assets');
 
+      // The team key from .env.local, re-read if lock.json changes (password changed). null = can't check.
+      let cached: { lock: string; key: Promise<CryptoKey | null> } | null = null;
+      const verifyKey = () => {
+        const lock = fs.readFileSync(path.join(dataDir, LOCK_FILE), 'utf8');
+        if (cached?.lock !== lock) {
+          cached = {
+            lock,
+            key: dataKey(dataDir).catch((e: Error) => {
+              server.config.logger.warn(`[logbook] ${e.message} Saves are not checked against the team password.`);
+              return null;
+            }),
+          };
+        }
+        return cached.key;
+      };
+
       server.middlewares.use((req, res, next) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
         const pathname = decodeURIComponent(url.pathname);
@@ -67,6 +90,7 @@ export function logbookFiles(options: Options = {}): Plugin {
         }
 
         if (req.method === 'PUT' && pathname === '/__logbook/save') {
+          if (isLocked(dataDir)) return send(res, 403, { error: 'The log book is encrypted. Sign in again.' });
           readBody(req)
             .then((body) => {
               JSON.parse(body.toString('utf8')); // refuse anything that is not valid JSON
@@ -78,11 +102,34 @@ export function logbookFiles(options: Options = {}): Plugin {
           return;
         }
 
+        if (req.method === 'PUT' && pathname === '/__logbook/save-sealed') {
+          if (!isLocked(dataDir)) return send(res, 400, { error: 'The log book is not encrypted' });
+          readBody(req)
+            .then(async (body) => {
+              const text = body.toString('utf8');
+              if (!looksSealed(text)) throw new Error('Not an encrypted log book');
+              const key = await verifyKey();
+              if (key && !(await openWorkspaceText(key, text).then(() => true, () => false))) {
+                return send(res, 403, { error: 'Wrong password' });
+              }
+              writeAtomic(path.join(dataDir, SEALED_WORKSPACE_FILE), body);
+              send(res, 200, { ok: true, savedAt: new Date().toISOString() });
+            })
+            .catch((err: Error) => send(res, 400, { error: err.message }));
+          return;
+        }
+
         if (req.method === 'PUT' && pathname.startsWith('/__logbook/asset/')) {
           const name = pathname.slice('/__logbook/asset/'.length);
           if (!SAFE_NAME.test(name)) return send(res, 400, { error: 'Bad file name' });
+          const locked = isLocked(dataDir);
+          if (locked && !name.endsWith(ENC_SUFFIX)) return send(res, 403, { error: 'The log book is encrypted. Sign in again.' });
           readBody(req)
-            .then((body) => {
+            .then(async (body) => {
+              const key = locked ? await verifyKey() : null;
+              if (key && !(await decryptBytes(key, new Uint8Array(body)).then(() => true, () => false))) {
+                return send(res, 403, { error: 'Wrong password' });
+              }
               fs.mkdirSync(assetsDir, { recursive: true });
               writeAtomic(path.join(assetsDir, name), body);
               send(res, 200, { ok: true });
@@ -94,6 +141,10 @@ export function logbookFiles(options: Options = {}): Plugin {
         if ((req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith(`/${dataDirName}/`)) {
           const file = path.resolve(root, '.' + pathname);
           if (!file.startsWith(dataDir + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+            return send(res, 404, { error: 'Not found' });
+          }
+          // Once locked, never hand out a stray plain copy (e.g. to phones with `--host`).
+          if (isLocked(dataDir) && !file.endsWith(ENC_SUFFIX) && path.basename(file) !== LOCK_FILE) {
             return send(res, 404, { error: 'Not found' });
           }
           res.statusCode = 200;
@@ -109,6 +160,15 @@ export function logbookFiles(options: Options = {}): Plugin {
     async closeBundle() {
       const src = path.resolve(root, dataDirName);
       const dest = path.join(outDir, dataDirName);
+      if (isLocked(src)) {
+        // Already encrypted in the repo: publish lock.json and the .enc files, nothing else.
+        fs.cpSync(src, dest, {
+          recursive: true,
+          filter: (from) =>
+            fs.statSync(from).isDirectory() || path.basename(from) === LOCK_FILE || (options.publishData !== false && from.endsWith(ENC_SUFFIX)),
+        });
+        return;
+      }
       if (!options.password) {
         if (options.publishData !== false && fs.existsSync(src)) fs.cpSync(src, dest, { recursive: true });
         return;
@@ -122,7 +182,8 @@ export function logbookFiles(options: Options = {}): Plugin {
         if (path.basename(rel).startsWith('.') || rel.endsWith('.tmp') || !fs.statSync(file).isFile()) continue;
         const out = path.join(dest, rel + ENC_SUFFIX);
         fs.mkdirSync(path.dirname(out), { recursive: true });
-        fs.writeFileSync(out, await encryptBytes(key, new Uint8Array(fs.readFileSync(file))));
+        const bytes = new Uint8Array(fs.readFileSync(file));
+        fs.writeFileSync(out, rel === WORKSPACE_FILE ? await sealWorkspaceText(key, new TextDecoder().decode(bytes)) : await encryptBytes(key, bytes));
       }
     },
   };

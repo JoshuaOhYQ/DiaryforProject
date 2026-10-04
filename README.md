@@ -23,7 +23,8 @@ can hold several projects, and new ones start from a template.
   next 7 days, and days since each member's last entry.
 
 Built with Vite + React + TypeScript. There is no server or account: data lives in your browser
-and in `data/logbook.json`, which you commit to Git like any other file.
+and in `data/logbook.json`, which you commit to Git like any other file. It can be committed
+**encrypted** (`npm run lock`), so the repo can be public while only the team can read the log book.
 
 ---
 
@@ -37,6 +38,16 @@ and in `data/logbook.json`, which you commit to Git like any other file.
    npm install      # also registers the Git merge driver for data/logbook.json
    npm run dev      # open http://localhost:5173
    ```
+
+3. If the log book is encrypted (there is a `data/lock.json`), create a file called `.env.local`
+   in this folder containing the team password:
+
+   ```text
+   LOGBOOK_PASSWORD=the team password
+   ```
+
+   Git ignores `.env.local`, so it is never committed. It lets Git merge teammates' entries; the
+   app itself asks for the same password when it opens.
 
 **If `node` or `npm` is "not recognized"** after installing Node, the terminal has an old PATH.
 First close all terminals (and VS Code) and open a new one. If that doesn't help, check that Node
@@ -65,6 +76,9 @@ That's it. While `npm run dev` is running, **every change is written to `data/lo
 | `npm test` | Run the tests (data layer, merging, Gantt date maths, log book builder, importer) |
 | `npm run build` | Build the static site into `dist/` (includes a copy of `data/`) |
 | `npm run seed -- --force` | Recreate `data/logbook.json` from the PIPER template and `docs/WORK_LOG_smart_home.md` |
+| `npm run lock` | Encrypt the log book in the repo with `LOGBOOK_PASSWORD` (see [Keeping the log book private](#keeping-the-log-book-private)) |
+| `npm run lock -- --rekey` | Change the password (`LOGBOOK_NEW_PASSWORD` = the new one) |
+| `npm run lock -- --decrypt` | Turn encryption off again |
 
 ## Everyday use
 
@@ -138,33 +152,45 @@ doesn't say how long it took, so edit that entry and set them.
 The deployed site is a static copy: it shows the log book as it was when it was built, and
 each visitor's own changes stay in their browser unless they connect the data folder.
 
-**Admin password.** When `LOGBOOK_PASSWORD` is set at build time, the site opens on a sign-in page
-and the published `data/` is encrypted with that password (AES-256-GCM, key from PBKDF2), so
-fetching `data/logbook.json.enc` directly gives nothing readable. Everyone on the team uses the
-same password; *Keep me signed in* remembers it on that device, and the log-out button in the top
-bar forgets it. Changing the password and redeploying signs everyone out. `npm run dev` never asks
-for it.
-
-- **GitHub Pages**: add the password as a repository secret named `LOGBOOK_PASSWORD`
-  (*Settings → Secrets and variables → Actions*). The deploy fails without it, so the log book is
-  never published unencrypted.
-- **Vercel**: add `LOGBOOK_PASSWORD` under *Project → Settings → Environment Variables*.
-- **Local build**: put `LOGBOOK_PASSWORD=...` in `.env.local` (ignored by Git), or set it in the
-  terminal, before `npm run build`.
-
-Use a long password: anyone can download the encrypted file and try passwords offline.
-
-**Privacy:** the password protects the *deployed site* only. `data/logbook.json` is committed in
-plain text, so if the GitHub repo is public, anyone can read it there (including old versions in
-the history). Make the repo private to keep the log book private. GitHub Pages from a private repo
-needs GitHub Pro, which is free for students (GitHub Student Developer Pack); Vercel deploys
-private repos on its free plan. To deploy an empty app, set `LOGBOOK_PUBLISH_DATA=false` when building.
+The site asks for the team password before showing anything when the log book is encrypted
+(see below). Each person signs in once; *Keep me signed in* remembers it on that device, and the
+log-out button in the top bar forgets it.
 
 - **GitHub Pages**: push to `main`, then in the repo go to *Settings → Pages → Source:
   GitHub Actions*. The workflow in `.github/workflows/deploy.yml` tests, builds and publishes on
   every push. The site appears at `https://<user>.github.io/<repo>/`.
 - **Vercel**: *Add New Project* → import the repo. Vercel detects Vite: build command
   `npm run build`, output directory `dist`. No other settings are needed.
+
+## Keeping the log book private
+
+With `npm run lock` the log book is stored **encrypted** in the repo, so the code can be public
+on GitHub while only people with the team password can read the entries:
+
+- `data/lock.json` holds a random salt and a password check. It is not secret.
+- `data/logbook.json.enc` and `data/assets/*.enc` are the log book and screenshots, encrypted with
+  AES-256-GCM using a key derived from the password (PBKDF2, 600 000 rounds).
+- The app encrypts and decrypts in the browser, after you sign in, in `npm run dev`, on the
+  deployed site and with a connected folder alike. The dev server only ever stores encrypted data
+  and refuses plain files once the log book is locked.
+- The Git merge driver reads `LOGBOOK_PASSWORD` from `.env.local` to merge teammates' entries.
+  Without it, Git leaves a conflict; open the app, sign in, and it merges both sides for you.
+- The deployed site publishes the committed encrypted files as they are. The deploy refuses to
+  publish an unencrypted log book.
+
+Things to know:
+
+- **Use a long, random password.** The encrypted files are public, so anyone can try passwords
+  offline. Share it with the team privately, never in the repo or a public chat.
+- **If the password leaks, every old commit can be decrypted.** Changing it
+  (`npm run lock -- --rekey`) protects new commits only.
+- **Encrypting doesn't remove what was committed before.** Old commits keep any plain
+  `data/logbook.json`; removing it means rewriting the Git history.
+- `git diff` can't show what changed in the log book; every save rewrites the whole line.
+- Changing the password: put the current one in `LOGBOOK_PASSWORD` and the new one in
+  `LOGBOOK_NEW_PASSWORD` in `.env.local`, run `npm run lock -- --rekey`, then set
+  `LOGBOOK_PASSWORD` to the new one, commit `data/` and tell the team. Everyone should pull
+  before saving again.
 
 ## Backups
 
@@ -182,6 +208,7 @@ src/
     localDb.ts     IndexedDB in the browser
     fileTargets.ts where logbook.json lives: dev server, connected folder, or read-only site
     merge.ts       record-by-record merge (also used by the Git merge driver)
+    sealed.ts      the encrypted form of data/ (lock.json, *.enc); crypto itself is in lib/lock.ts
     workspace.ts   the file format, defaults and validation
   gantt/         ganttMath.ts (dependencies, slippage), layout, SVG chart, task panel, export
   logbook/       buildWeek.ts (what goes on a page), narrative draft, Word export, print layout
@@ -189,7 +216,7 @@ src/
   templates/     project templates (PIPER, engineering, blank)
   pages/         Dashboard, Log, Gantt, Team, Log book, Settings
 vite-plugin-logbook.ts   dev-only endpoint that writes data/ to disk
-scripts/                 seed, Git merge driver and its setup
+scripts/                 seed, lock (encryption), Git merge driver and its setup
 data/logbook.json        the shared log book; data/assets/ holds screenshots
 ```
 
@@ -214,3 +241,7 @@ of the app never strips data a newer one added.
 - **A screenshot shows as a file icon** on a teammate's computer: they need to `git pull` (the image
   is in `data/assets/`).
 - **`npm` or `node` not found**: install Node.js (see Setup) and open a new terminal.
+- **"Could not decrypt data/logbook.json.enc"**: the password was changed. Log out (top bar) and
+  sign in with the new one, and update `.env.local`.
+- **`logbook merge driver: The log book is encrypted…`** during `git pull`: add `LOGBOOK_PASSWORD`
+  to `.env.local`. For this pull, open the app and sign in; it merges the conflict, then commit.
