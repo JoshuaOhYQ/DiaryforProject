@@ -197,14 +197,18 @@ async function encrypt() {
   for (const file of unowned) console.log(`Left ${rel(source.get(file)!)} where it is: no entry uses it.`);
 
   console.log('\nDone. Commit data/ (git add -A data): lock.json and the .enc files under data/projects/.');
-  if (added.length) {
+  // Only mention passwords .env.local doesn't already hold.
+  const inEnv = await knownProjectKeys(lock);
+  const missing = added.filter((id) => !inEnv.has(id));
+  if (missing.length) {
     console.log('\nSo Git can merge teammates’ entries, add the password(s) to .env.local (never commit it), e.g.:');
-    for (const id of added) console.log(`  ${envName(nameOf(id))}=<the password of "${nameOf(id)}">`);
-    console.log('Give each project’s password only to the people who should see that project.');
+    for (const id of missing) console.log(`  ${envName(nameOf(id))}=<the password of "${nameOf(id)}">`);
   }
+  if (added.length) console.log('\nGive each project’s password only to the people who should see that project.');
   if (legacy) {
-    console.log('\nThe old team password still opens every commit made before this one: share only the new project');
-    console.log('passwords from now on, and remove LOGBOOK_PASSWORD from .env.local if it is no longer a project password.');
+    console.log('\nThe old team password still opens every commit made before this one: share only the new project passwords from now on.');
+    const old = readPassword('LOGBOOK_PASSWORD');
+    if (old && !(await unlockProjects(lock, old)).size) console.log('LOGBOOK_PASSWORD in .env.local is no longer a project password; you can delete that line.');
   }
 }
 

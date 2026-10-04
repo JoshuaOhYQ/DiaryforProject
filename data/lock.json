@@ -1,6 +1,11 @@
 {
-  "v": 1,
-  "salt": "EGBFc53hrNQ5bSYvMFoYog==",
+  "v": 2,
+  "salt": "lsXikemZDNSIBMWSdLVPYg==",
   "iterations": 600000,
-  "check": "JDtHIhmXV05Kjf+jW2rpAHOnvoX4stuDzEKzte22b3fw9w4OZOEF5iaXiA=="
+  "projects": {
+    "mupbblsq-00amwv": {
+      "key": "2As82baELwO0L9OV3ujORf4Pv0adCTqVcai4hKSrBP1NSyH9UEa9MxcB8QbFghgaFhKGILIrBXGzMhMk",
+      "check": "pz/7OwE+tFAQCREtcRtPd1mmzZd7bsJU4Ug1cO65l8zpa1rBRasNkxC+mLDh46uHA4O37rqH7sDGSbk="
+    }
+  }
 }

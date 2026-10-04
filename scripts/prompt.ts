@@ -24,8 +24,9 @@ function open() {
 /** Ask a question and return the line typed (hidden when `hidden`). */
 export async function ask(question: string, hidden = false): Promise<string> {
   open();
-  process.stdout.write(question);
   muted = hidden && !!process.stdin.isTTY;
+  // Say so, or a prompt that echoes nothing looks frozen.
+  process.stdout.write(muted ? question.replace(/:\s*$/, ' (typing is hidden, press Enter when done): ') : question);
   const next = await lines!.next();
   muted = false;
   if (next.done) throw new Error('No answer given (input ended).');
