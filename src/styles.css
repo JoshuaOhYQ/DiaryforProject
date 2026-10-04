@@ -2103,8 +2103,27 @@ dialog.modal::backdrop {
   margin: 14vh auto 3rem;
   padding: 0 16px;
 }
+.login.wide {
+  max-width: 540px;
+  margin-top: 6vh;
+}
 .login .card {
   gap: 1.1rem;
+}
+.login-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--grid);
+}
+fieldset.bare {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
 }
 /* Password with a hold-to-reveal eye button */
 .password-field {

@@ -56,9 +56,11 @@ export function SettingsPage() {
           <section className="card card-pad">
             <div className="section-title">
               <h2>Projects</h2>
-              <button className="btn small" onClick={actions.newProject}>
-                <Plus size={15} /> New project
-              </button>
+              {!isLockedSite() && (
+                <button className="btn small" onClick={actions.newProject}>
+                  <Plus size={15} /> New project
+                </button>
+              )}
             </div>
             {ws.projects.map((p) => {
               const entries = ws.entries.filter((e) => e.projectId === p.id).length;
@@ -98,7 +100,8 @@ export function SettingsPage() {
             {isLockedSite() && (
               <p className="small muted" style={{ marginTop: '0.75rem' }}>
                 Each project has its own password and only the projects you signed in to are listed. Use the project picker → <em>Open another project</em> to
-                add one. To change a project’s password, run <code>npm run lock -- --password</code> in the repo.
+                add one. New projects are created on the sign-in page with the admin password. To change a project’s password, run{' '}
+                <code>npm run lock -- --password</code> in the repo.
               </p>
             )}
           </section>
@@ -121,7 +124,8 @@ function ProjectForm({ project }: { project: Project }) {
       .split(',')
       .map((t) => t.trim())
       .filter((t, i, all) => t && all.indexOf(t) === i);
-    store.put('projects', { ...p, name: p.name.trim() || 'Untitled project', entryTypes: entryTypes.length ? entryTypes : DEFAULT_ENTRY_TYPES, repoUrl: p.repoUrl.trim().replace(/\.git$/, '').replace(/\/+$/, '') });
+    const name = p.name.trim() || 'Untitled project';
+    store.put('projects', { ...p, name, entryTypes: entryTypes.length ? entryTypes : DEFAULT_ENTRY_TYPES, repoUrl: p.repoUrl.trim().replace(/\.git$/, '').replace(/\/+$/, '') });
     toast('Project details saved');
   }
 

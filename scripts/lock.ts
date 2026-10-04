@@ -2,13 +2,15 @@
  * Encrypt the log book in the repo, so it can be public on GitHub without anyone reading it.
  * Every project has its own password, so sharing one project's password shares only that project.
  *
- *   npm run lock                  encrypt data/: asks for a password for each project that has none yet
- *                                 (also upgrades the old one-password lock, using LOGBOOK_PASSWORD)
+ *   npm run lock                  encrypt data/: asks for a password for each project that has none yet,
+ *                                 and for an admin password (needed to create projects) if there is none;
+ *                                 also upgrades the old one-password lock, using LOGBOOK_PASSWORD
  *   npm run lock -- --password    change one project's password (asks for the current one, then the new one)
+ *   npm run lock -- --admin       change the admin password
  *   npm run lock -- --decrypt     turn encryption off again (plain data/logbook.json, no lock.json)
  *
- * Passwords are typed in the terminal. Known ones are also read from LOGBOOK_PASSWORD and
- * LOGBOOK_PASSWORD_<NAME> in the environment or .env.local (which Git ignores).
+ * Passwords are typed in the terminal. Known ones are also read from the environment or .env.local
+ * (which Git ignores): LOGBOOK_PASSWORD / LOGBOOK_PASSWORD_<NAME> for projects, LOGBOOK_ADMIN_PASSWORD for the admin.
  * Encrypting only protects new commits: older commits still hold whatever was committed before.
  */
 import fs from 'node:fs';
@@ -20,8 +22,12 @@ import {
   encryptBytes,
   LOCK_FILE,
   newLock,
+  setAdminPassword,
+  setProjectName,
   setProjectPassword,
+  unlockAdmin,
   unlockLegacy,
+  unlockProject,
   unlockProjects,
   type LegacyLockInfo,
   type LockInfo,
@@ -83,13 +89,67 @@ async function askProjectKey(lock: LockInfo, id: string, name: string): Promise<
   throw new Error(`Could not open "${name}".`);
 }
 
-/** Ask for a new password that no other project in `lock` uses. */
+/** True if the password already belongs to a project or the admin in `lock`. */
+async function inUse(lock: LockInfo, password: string): Promise<boolean> {
+  return (await unlockProjects(lock, password)).size > 0 || !!(await unlockAdmin(lock, password));
+}
+
+/** Ask for a new password that no other project (nor the admin) in `lock` uses. */
 async function askUniquePassword(lock: LockInfo, name: string): Promise<string> {
   for (;;) {
     const password = await askNewPassword(`"${name}"`);
-    if (!(await unlockProjects(lock, password)).size) return password;
-    console.log('  That password already opens another project. Choose a different one, so each project keeps its own.');
+    if (!(await inUse(lock, password))) return password;
+    console.log('  That password is already used by another project or the admin. Choose a different one.');
   }
+}
+
+/** A new admin password: LOGBOOK_ADMIN_PASSWORD from .env.local (first time only), or typed in. */
+async function askAdminPassword(lock: LockInfo, fromEnv: boolean): Promise<string> {
+  const env = fromEnv ? readPassword('LOGBOOK_ADMIN_PASSWORD') : undefined;
+  if (env) {
+    if ((await unlockProjects(lock, env)).size) throw new Error('LOGBOOK_ADMIN_PASSWORD is also a project password. Use a different one for the admin.');
+    console.log('Using LOGBOOK_ADMIN_PASSWORD from .env.local as the admin password.');
+    return env;
+  }
+  console.log('The admin password is needed to create projects. It does not open any project.');
+  for (;;) {
+    const password = await askNewPassword('the admin');
+    if (!(await unlockProjects(lock, password)).size) return password;
+    console.log('  That is a project password. Choose a different one for the admin.');
+  }
+}
+
+/**
+ * Bring lock.json up to date: each project's name for the sign-in page (from `names`, or read from
+ * the projects this computer can open) and an admin password if there is none yet.
+ */
+async function finishLock(lock: LockInfo, keys: ProjectKeys, names: Map<string, string>): Promise<LockInfo> {
+  const all = new Map([...(await knownProjectKeys(lock)), ...keys]);
+  for (const id of Object.keys(lock.projects)) {
+    if (lock.projects[id].name || all.has(id)) continue;
+    const password = await ask(`Password of project ${id}, to show its name on the sign-in page (Enter to skip): `, true).catch(() => '');
+    if (!password) continue;
+    const key = await unlockProject(lock, id, password);
+    if (key) all.set(id, key);
+    else console.log('  That is not this project’s password; skipped.');
+  }
+  for (const [id, key] of all) {
+    if (!lock.projects[id]) continue;
+    let name = names.get(id);
+    if (name === undefined) {
+      const json = await readProjectFile(dataDir, id, key).catch(() => null);
+      name = json ? parseLogbookText(json).projects.find((p) => p.id === id)?.name : undefined;
+    }
+    if (name && name !== lock.projects[id].name) {
+      lock = setProjectName(lock, id, name);
+      console.log(`The sign-in page lists "${name}" (project names are public; everything inside stays encrypted).`);
+    }
+  }
+  if (!lock.admin) {
+    lock = await setAdminPassword(lock, await askAdminPassword(lock, true));
+    console.log('Admin password set.');
+  }
+  return lock;
 }
 
 /** The key of the old one-password lock, from LOGBOOK_PASSWORD or typed in. */
@@ -143,7 +203,13 @@ async function encrypt() {
   const ids = projectIdsIn(ws);
   if (!existing && !ids.size) throw new Error('There is no log book to encrypt yet. Create a project first (npm run dev), then run this again.');
   if (existing?.v === 2 && !ids.size && !looseAssets.size) {
-    console.log('Everything in data/ is already encrypted. To change a password: npm run lock -- --password');
+    const updated = await finishLock(lock, new Map(), new Map());
+    if (JSON.stringify(updated) === JSON.stringify(lock)) {
+      console.log('Everything in data/ is already encrypted. To change a password: npm run lock -- --password (or --admin)');
+      return;
+    }
+    fs.writeFileSync(path.join(dataDir, LOCK_FILE), JSON.stringify(updated, null, 2) + '\n');
+    console.log('\nUpdated data/lock.json. Commit it (git add data/lock.json).');
     return;
   }
 
@@ -166,13 +232,16 @@ async function encrypt() {
       if (current) slice = mergeWorkspaces(parseLogbookText(current), slice);
     } else {
       if (!added.length) console.log('Each project gets its own password. Only people with a project’s password can open it.\n');
-      const next = await setProjectPassword(lock, id, await askUniquePassword(lock, nameOf(id)));
+      const next = await setProjectPassword(lock, id, await askUniquePassword(lock, nameOf(id)), { name: nameOf(id) });
       lock = next.info;
       keys.set(id, next.key);
       added.push(id);
     }
     slices.push({ id, ws: slice });
   }
+
+  const sliceNames = new Map(slices.flatMap((s) => s.ws.projects.filter((p) => p.id === s.id).map((p) => [s.id, p.name] as const)));
+  lock = await finishLock(lock, keys, sliceNames);
 
   // Screenshots go to the project of the entry they are attached to.
   const owners = assetOwners(merged([ws, ...slices.map((s) => s.ws)]));
@@ -250,6 +319,22 @@ async function changePassword() {
   console.log('Commits made before this one can still be opened with the old password.');
 }
 
+async function changeAdmin() {
+  const lock = readCurrentLock();
+  if (lock.admin) {
+    const env = readPassword('LOGBOOK_ADMIN_PASSWORD');
+    let ok = !!env && !!(await unlockAdmin(lock, env));
+    for (let i = 0; !ok && i < 3; i++) {
+      ok = !!(await unlockAdmin(lock, await ask('Current admin password: ', true)));
+      if (!ok) console.log('  Wrong admin password.');
+    }
+    if (!ok) throw new Error('Wrong admin password. (If it is lost, delete the "admin" block from data/lock.json and run npm run lock.)');
+  }
+  const info = await setAdminPassword(lock, await askAdminPassword(lock, false));
+  fs.writeFileSync(path.join(dataDir, LOCK_FILE), JSON.stringify(info, null, 2) + '\n');
+  console.log('Admin password changed. Update LOGBOOK_ADMIN_PASSWORD in .env.local if you keep it there, and commit data/lock.json.');
+}
+
 async function decrypt() {
   const lock = readCurrentLock();
   const keys = await knownProjectKeys(lock);
@@ -284,7 +369,7 @@ async function decrypt() {
 const args = process.argv.slice(2);
 try {
   if (args.includes('--rekey')) throw new Error('--rekey is now --password: every project has its own password.');
-  await (args.includes('--password') ? changePassword() : args.includes('--decrypt') ? decrypt() : encrypt());
+  await (args.includes('--password') ? changePassword() : args.includes('--admin') ? changeAdmin() : args.includes('--decrypt') ? decrypt() : encrypt());
 } catch (e) {
   console.error((e as Error).message);
   process.exitCode = 1;

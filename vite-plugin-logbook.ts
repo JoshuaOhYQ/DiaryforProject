@@ -5,7 +5,8 @@
  *   GET  /__logbook/ping              tells the app that file saving is available
  *   PUT  /__logbook/file/<path>       body = file contents -> data/<path>, for these paths only:
  *          logbook.json, assets/<name>                         a plain log book
- *          lock.json                                           a locked one: only new projects may be added
+ *          lock.json                                           a locked one: only adding a project (with the admin
+ *                                                              key) or renaming one (with its key) is allowed
  *          projects/<id>/logbook.json.enc,
  *          projects/<id>/assets/<name>.enc                     a locked project's files
  *
@@ -23,7 +24,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
-import { decryptBytes, encryptBytes, ENC_SUFFIX, isLockInfo, LOCK_FILE, newLock, passwordKey, setProjectPassword, type LockInfo, type ProjectKeys } from './src/lib/lock.ts';
+import {
+  ADMIN_HEADER,
+  checkAdminKey,
+  checkProjectKey,
+  decryptBytes,
+  encryptBytes,
+  ENC_SUFFIX,
+  importKey,
+  isLockInfo,
+  LOCK_FILE,
+  newLock,
+  passwordKey,
+  PROJECT_HEADER,
+  setProjectPassword,
+  type LockInfo,
+  type ProjectKeys,
+} from './src/lib/lock.ts';
 import { parseLogbookText } from './src/data/merge.ts';
 import { looksSealed, openWorkspaceText, PROJECTS_DIR, projectAssetPath, projectWorkspacePath, SEALED_WORKSPACE_FILE, sealWorkspaceText, WORKSPACE_FILE } from './src/data/sealed.ts';
 import { projectIdsIn, projectSlice, serializeWorkspace } from './src/data/workspace.ts';
@@ -49,8 +66,15 @@ class Refused extends Error {
   }
 }
 
-/** A new lock.json may only add projects: the salt and every existing project's entry must stay as they are. */
-function checkLockUpdate(current: LockInfo, text: string) {
+/**
+ * A new lock.json may only add projects (with the admin key) or rename them (with that project's
+ * key or the admin key). The salt, the admin password and every project's keys must stay as they are.
+ */
+async function checkLockUpdate(current: LockInfo, text: string, headers: IncomingMessage['headers']) {
+  const header = async (name: string) => {
+    const v = headers[name.toLowerCase()];
+    return typeof v === 'string' ? importKey(v).catch(() => null) : null;
+  };
   let next: unknown;
   try {
     next = JSON.parse(text);
@@ -58,13 +82,30 @@ function checkLockUpdate(current: LockInfo, text: string) {
     throw new Refused(400, 'lock.json is not valid JSON');
   }
   if (!isLockInfo(next) || next.salt !== current.salt || next.iterations !== current.iterations) throw new Refused(400, 'Not an update of data/lock.json');
+  if (JSON.stringify(next.admin) !== JSON.stringify(current.admin)) throw new Refused(403, 'The admin password is changed with `npm run lock -- --admin`');
+  const renamed: string[] = [];
   for (const [id, entry] of Object.entries(current.projects)) {
-    if (JSON.stringify(next.projects[id]) !== JSON.stringify(entry)) {
+    const updated = next.projects[id];
+    if (updated?.key !== entry.key || updated.check !== entry.check) {
       throw new Refused(403, 'Project passwords are changed or removed with `npm run lock`, not from the app');
     }
+    if ((updated.name ?? '') !== (entry.name ?? '')) renamed.push(id);
   }
-  for (const [id, entry] of Object.entries(next.projects)) {
+  const added = Object.keys(next.projects).filter((id) => !current.projects[id]);
+  for (const id of added) {
+    const entry = next.projects[id];
     if (!SAFE_NAME.test(id) || typeof entry?.key !== 'string' || typeof entry?.check !== 'string') throw new Refused(400, 'Bad project entry in lock.json');
+  }
+  const adminKey = await header(ADMIN_HEADER);
+  const isAdmin = !!adminKey && (await checkAdminKey(current, adminKey));
+  if (added.length && !isAdmin) {
+    throw new Refused(403, current.admin ? 'Wrong admin password' : 'No admin password is set yet. Run `npm run lock` to set one.');
+  }
+  if (renamed.length && !isAdmin) {
+    const projectKey = await header(PROJECT_HEADER);
+    if (renamed.length > 1 || !projectKey || !(await checkProjectKey(current, renamed[0], projectKey))) {
+      throw new Refused(403, 'Only someone signed in to a project can rename it');
+    }
   }
 }
 const MAX_BODY = 60 * 1024 * 1024;
@@ -113,7 +154,7 @@ export function logbookFiles(options: Options = {}): Plugin {
       };
 
       /** Check a write to data/<rel>; returns the file to write or throws Refused. */
-      const checkWrite = async (rel: string, body: Buffer): Promise<string> => {
+      const checkWrite = async (rel: string, body: Buffer, req: IncomingMessage): Promise<string> => {
         const parts = rel.split('/');
         const file = path.join(dataDir, ...parts);
         const locked = isLocked(dataDir);
@@ -131,7 +172,7 @@ export function logbookFiles(options: Options = {}): Plugin {
           throw new Refused(409, (e as Error).message);
         }
         if (rel === LOCK_FILE) {
-          checkLockUpdate(lock, body.toString('utf8'));
+          await checkLockUpdate(lock, body.toString('utf8'), req.headers);
           return file;
         }
         const [dir, id, ...rest] = parts;
@@ -169,7 +210,7 @@ export function logbookFiles(options: Options = {}): Plugin {
         if (req.method === 'PUT' && pathname.startsWith(FILE_ROUTE)) {
           readBody(req)
             .then(async (body) => {
-              const file = await checkWrite(pathname.slice(FILE_ROUTE.length), body);
+              const file = await checkWrite(pathname.slice(FILE_ROUTE.length), body, req);
               fs.mkdirSync(path.dirname(file), { recursive: true });
               writeAtomic(file, body);
               send(res, 200, { ok: true, savedAt: new Date().toISOString() });
@@ -228,7 +269,7 @@ export function logbookFiles(options: Options = {}): Plugin {
         fs.writeFileSync(out, data);
       };
       for (const id of projectIdsIn(ws)) {
-        const next = await setProjectPassword(lock, id, wrapKey);
+        const next = await setProjectPassword(lock, id, wrapKey, { name: ws.projects.find((p) => p.id === id)?.name });
         lock = next.info;
         keys.set(id, next.key);
         write(projectWorkspacePath(id), await sealWorkspaceText(next.key, serializeWorkspace(projectSlice(ws, id))));

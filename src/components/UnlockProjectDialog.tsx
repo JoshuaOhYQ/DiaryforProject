@@ -1,33 +1,44 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { addToSession, loadLock } from '../app/auth.ts';
 import { getDataKeys, store } from '../data/index.ts';
 import { setPref } from '../lib/prefs.ts';
-import { unlockProjects } from '../lib/lock.ts';
+import { listProjects, unlockProject, type LockInfo } from '../lib/lock.ts';
 import { Modal } from './Modal.tsx';
 import { PasswordField } from './PasswordField.tsx';
+import { ProjectSelect } from './ProjectSelect.tsx';
 
-/** Add another project to this session by entering that project's password. */
+/** Add another project to this session: choose it and enter that project's password. */
 export function UnlockProjectDialog({ onClose }: { onClose: () => void }) {
+  const [lock, setLock] = useState<LockInfo | null>(null);
+  const [projectId, setProjectId] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Read lock.json fresh: a git pull may have added projects since sign-in.
+  useEffect(() => {
+    void loadLock().then((l) => setLock(l && l !== 'outdated' ? l : null));
+  }, []);
+  const open = getDataKeys();
+  const projects = lock ? listProjects(lock).filter((p) => !open?.has(p.id)) : [];
+  const onlyChoice = projects.length === 1 ? projects[0].id : '';
+  useEffect(() => {
+    if (onlyChoice) setProjectId((id) => id || onlyChoice);
+  }, [onlyChoice]);
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!password || busy) return;
+    if (!lock || !projectId || !password || busy) return;
     setBusy(true);
     setError(null);
-    const lock = await loadLock();
-    const keys = lock && lock !== 'outdated' ? await unlockProjects(lock, password).catch(() => null) : null;
-    const open = getDataKeys();
-    const fresh = keys && new Map([...keys].filter(([id]) => !open?.has(id)));
-    if (!fresh?.size) {
+    const key = await unlockProject(lock, projectId, password).catch(() => null);
+    if (!key) {
       setBusy(false);
-      setError(keys?.size ? 'That project is already open.' : 'Wrong password.');
+      setError('Wrong password for this project.');
       return;
     }
-    await addToSession(fresh);
-    setPref('project', [...fresh.keys()][0]);
+    await addToSession(new Map([[projectId, key]]));
+    setPref('project', projectId);
     // Reload so the new project is read from the files like at sign-in.
     await store.flush().catch(() => undefined);
     location.reload();
@@ -44,23 +55,32 @@ export function UnlockProjectDialog({ onClose }: { onClose: () => void }) {
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" type="submit" form="unlock-form" disabled={busy || !password}>
+          <button className="btn primary" type="submit" form="unlock-form" disabled={busy || !projectId || !password}>
             {busy ? 'Checking…' : 'Open project'}
           </button>
         </>
       }
     >
       <form id="unlock-form" className="stack" onSubmit={submit}>
-        <PasswordField
-          id="unlock-password"
-          label="Project password"
-          value={password}
-          onChange={setPassword}
-          autoComplete="current-password"
-          autoFocus
-          error={error}
-          hint="Each project has its own password. The projects you already have open stay open."
-        />
+        {!lock ? (
+          <p className="muted">Loading projects…</p>
+        ) : !projects.length ? (
+          <p className="muted">Every project is already open.</p>
+        ) : (
+          <>
+            <ProjectSelect id="unlock-project" projects={projects} value={projectId} onChange={(id) => (setProjectId(id), setError(null))} />
+            <PasswordField
+              id="unlock-password"
+              label="Password"
+              value={password}
+              onChange={setPassword}
+              autoComplete="current-password"
+              autoFocus
+              error={error}
+              hint="The projects you already have open stay open."
+            />
+          </>
+        )}
       </form>
     </Modal>
   );

@@ -1,13 +1,44 @@
 /** Creating, copying and deleting whole projects. */
 import type { CollectionName, Project, Workspace } from '../types.ts';
-import { store, type ProjectData } from '../data/index.ts';
+import { getDataKeys, setDataKeys, store, type ProjectData } from '../data/index.ts';
+import { unlockAdmin, type LockInfo } from '../lib/lock.ts';
 import { addProjectPassword } from './auth.ts';
 import { instantiateTemplate, type ProjectTemplate } from '../templates/index.ts';
 
-/** On a locked log book, pass the new project's own password: it is saved in data/lock.json first. */
-export async function createProject(template: ProjectTemplate, overrides: Partial<Project> = {}, password?: string): Promise<string> {
+export function createProject(template: ProjectTemplate, overrides: Partial<Project> = {}): string {
   const { projectId, changes } = instantiateTemplate(template, overrides);
-  if (password !== undefined) await addProjectPassword(projectId, password);
+  store.apply(changes);
+  return projectId;
+}
+
+/** Why a locked log book can't save a new project from here, or null when it can. */
+export function cannotSaveNewProject(): string | null {
+  const status = store.getStatus();
+  if (store.canWriteFiles) return null;
+  if (status.folderNeedsPermission) return 'Allow access to the data folder first.';
+  return status.folderSupported
+    ? 'Connect the repo’s data folder first, or open the app with `npm run dev`.'
+    : 'Open the app with `npm run dev` (or in Chrome/Edge with the data folder connected) to create a project.';
+}
+
+/**
+ * Create a project on a locked log book (from the sign-in page): checks the admin password, saves
+ * the new project's own password in data/lock.json, then signs in to the new project.
+ */
+export async function createLockedProject(
+  lock: LockInfo,
+  template: ProjectTemplate,
+  { name, password, adminPassword }: { name: string; password: string; adminPassword: string },
+): Promise<string> {
+  if (!lock.admin) throw new Error('No admin password is set yet. Run `npm run lock` in the repo to set one.');
+  const adminKey = await unlockAdmin(lock, adminPassword);
+  if (!adminKey) throw new Error('Wrong admin password.');
+  if (!getDataKeys()) setDataKeys(new Map()); // locked, with nothing open yet
+  await store.init();
+  const problem = cannotSaveNewProject();
+  if (problem) throw new Error(problem);
+  const { projectId, changes } = instantiateTemplate(template, { name });
+  await addProjectPassword(projectId, name, password, adminKey);
   store.apply(changes);
   return projectId;
 }

@@ -16,7 +16,7 @@ import { SettingsPage } from '../pages/SettingsPage.tsx';
 import { TeamPage } from '../pages/TeamPage.tsx';
 import { WelcomePage } from '../pages/WelcomePage.tsx';
 import { AppActionsContext, EntryEditorContext, ProjectContext, type AppActions, type EntryEditor } from './context.ts';
-import { isLockedSite, logout } from './auth.ts';
+import { isLockedSite, logout, syncProjectName } from './auth.ts';
 import { href, navigate, useRoute } from './router.ts';
 import { setThemeMode, useThemeMode } from './theme.ts';
 import { Toasts } from './toast.tsx';
@@ -120,6 +120,13 @@ export function App() {
     if (data) document.title = `${data.project.name} · Log book`;
   }, [data]);
 
+  // Keep the name on the sign-in page in step with the project (only writes when it differs).
+  const shownId = data?.project.id;
+  const shownName = data?.project.name;
+  useEffect(() => {
+    if (shownId && shownName && status.target !== 'none') void syncProjectName(shownId, shownName);
+  }, [shownId, shownName, status.target]);
+
   if (!status.ready) {
     return (
       <div className="empty" style={{ marginTop: '20vh' }}>
@@ -167,8 +174,7 @@ export function App() {
                         {p.name}
                       </option>
                     ))}
-                    <option value="__new">＋ New project…</option>
-                    {isLockedSite() && <option value="__unlock">Open another project…</option>}
+                    {isLockedSite() ? <option value="__unlock">Open another project…</option> : <option value="__new">＋ New project…</option>}
                   </select>
                 </div>
                 <nav className="nav" aria-label="Main">

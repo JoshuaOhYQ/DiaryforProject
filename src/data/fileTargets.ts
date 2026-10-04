@@ -10,7 +10,18 @@
  * session has keys for are read or written. Nothing leaves the browser unencrypted.
  */
 import type { Workspace } from '../types.ts';
-import { decryptBytes, encryptBytes, isLockInfo, LOCK_FILE, type LockInfo, type ProjectKeys } from '../lib/lock.ts';
+import {
+  ADMIN_HEADER,
+  decryptBytes,
+  encryptBytes,
+  exportKey,
+  isLockInfo,
+  LOCK_FILE,
+  PROJECT_HEADER,
+  type LockInfo,
+  type LockProof,
+  type ProjectKeys,
+} from '../lib/lock.ts';
 import { mergeWorkspaces, parseLogbookText } from './merge.ts';
 import { mimeForAsset, openWorkspaceText, projectAssetPath, projectWorkspacePath, sealWorkspaceText, WORKSPACE_FILE } from './sealed.ts';
 import { parseWorkspace, projectIdsIn, projectSlice, restrictWorkspace, serializeWorkspace } from './workspace.ts';
@@ -29,7 +40,8 @@ export interface FileTarget {
   writeAsset(file: string, blob: Blob, projectId: string): Promise<void>;
   /** data/lock.json, or null when the log book is not locked. */
   readLock(): Promise<LockInfo | null>;
-  writeLock(info: LockInfo): Promise<void>;
+  /** The dev server needs the admin key to add a project, and the project's key to rename it. */
+  writeLock(info: LockInfo, proof?: LockProof): Promise<void>;
 }
 
 const base = () => import.meta.env.BASE_URL ?? '/';
@@ -60,7 +72,7 @@ export function dataScope(): ReadonlySet<string> | null {
 export interface RawFiles {
   readText(file: string): Promise<string | null>;
   readBlob(file: string): Promise<Blob | null>;
-  writeText(file: string, text: string): Promise<void>;
+  writeText(file: string, text: string, headers?: Record<string, string>): Promise<void>;
   writeBlob(file: string, blob: Blob): Promise<void>;
 }
 
@@ -128,8 +140,11 @@ export function codec(raw: RawFiles, keys: () => ProjectKeys | null = () => data
         return null;
       }
     },
-    async writeLock(info) {
-      await raw.writeText(LOCK_FILE, JSON.stringify(info, null, 2) + '\n');
+    async writeLock(info, proof = {}) {
+      const headers: Record<string, string> = {};
+      if (proof.adminKey) headers[ADMIN_HEADER] = await exportKey(proof.adminKey);
+      if (proof.projectKey) headers[PROJECT_HEADER] = await exportKey(proof.projectKey);
+      await raw.writeText(LOCK_FILE, JSON.stringify(info, null, 2) + '\n', headers);
     },
   };
 }
@@ -169,8 +184,8 @@ export async function detectDevServer(): Promise<FileTarget | null> {
   const info = (await res.json().catch(() => null)) as { ok?: boolean; dataDir?: string } | null;
   if (!info?.ok) return null;
   const dir = info.dataDir ?? 'data';
-  const put = async (file: string, body: BodyInit) => {
-    const res = await fetch(`${base()}__logbook/file/${file.split('/').map(encodeURIComponent).join('/')}`, { method: 'PUT', body });
+  const put = async (file: string, body: BodyInit, headers?: Record<string, string>) => {
+    const res = await fetch(`${base()}__logbook/file/${file.split('/').map(encodeURIComponent).join('/')}`, { method: 'PUT', body, headers });
     if (res.ok) return;
     const reason = await res
       .json()
@@ -182,7 +197,7 @@ export async function detectDevServer(): Promise<FileTarget | null> {
     kind: 'dev-server',
     label: targetLabel(dir),
     writable: true,
-    ...codec({ ...fetchReads, writeText: put, writeBlob: put }),
+    ...codec({ ...fetchReads, writeText: put, writeBlob: (file, blob) => put(file, blob) }),
   };
 }
 

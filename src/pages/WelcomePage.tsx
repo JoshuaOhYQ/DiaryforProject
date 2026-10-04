@@ -1,18 +1,17 @@
 import { useState } from 'react';
-import { GitMerge, NotebookPen, RotateCcw } from 'lucide-react';
-import { isLockedSite } from '../app/auth.ts';
+import { GitMerge, LogOut, NotebookPen, RotateCcw } from 'lucide-react';
+import { isLockedSite, logout } from '../app/auth.ts';
 import { createProject } from '../app/projects.ts';
 import { mergeFromFile, restoreFromFile, SaveTargetPanel } from '../components/BackupControls.tsx';
-import { NewProjectDialog, TemplatePicker } from '../components/NewProjectDialog.tsx';
+import { TemplatePicker } from '../components/NewProjectDialog.tsx';
 import { TEMPLATES } from '../templates/index.ts';
 
 /** Shown when there are no projects yet (first run, or everything was deleted). */
 export function WelcomePage({ onCreated }: { onCreated: (id: string) => void }) {
   const [choice, setChoice] = useState(TEMPLATES[0].key);
   const [name, setName] = useState('');
-  const [creating, setCreating] = useState(false);
   const template = TEMPLATES.find((t) => t.key === choice)!;
-  // A locked log book needs a password for the new project, which the dialog asks for.
+  // On a locked log book, projects are created from the sign-in page with the admin password.
   const locked = isLockedSite();
 
   return (
@@ -32,17 +31,22 @@ export function WelcomePage({ onCreated }: { onCreated: (id: string) => void }) 
       <section className="card card-pad stack">
         <h2>Start a project</h2>
         {locked ? (
-          <div className="row">
-            <button className="btn primary" onClick={() => setCreating(true)}>
-              Create project
-            </button>
-          </div>
+          <>
+            <p className="muted" style={{ margin: 0 }}>
+              The project you signed in to is empty or was deleted. New projects are created from the sign-in page with the admin password.
+            </p>
+            <div className="row">
+              <button className="btn primary" onClick={() => void logout()}>
+                <LogOut size={16} /> Back to sign-in
+              </button>
+            </div>
+          </>
         ) : (
           <>
             <TemplatePicker options={TEMPLATES} value={choice} onChange={setChoice} />
             <div className="row">
               <input className="grow" aria-label="Project name" value={name} onChange={(e) => setName(e.target.value)} placeholder={template.project.name ?? 'Project name'} />
-              <button className="btn primary" onClick={async () => onCreated(await createProject(template, name.trim() ? { name: name.trim() } : {}))}>
+              <button className="btn primary" onClick={() => onCreated(createProject(template, name.trim() ? { name: name.trim() } : {}))}>
                 Create project
               </button>
             </div>
@@ -63,7 +67,6 @@ export function WelcomePage({ onCreated }: { onCreated: (id: string) => void }) 
         <SaveTargetPanel />
       </section>
 
-      {creating && <NewProjectDialog current={null} onClose={() => setCreating(false)} onCreated={onCreated} />}
     </div>
   );
 }

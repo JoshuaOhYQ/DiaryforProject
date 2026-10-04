@@ -1,7 +1,7 @@
 /**
  * Sign-in for a locked log book (see src/lib/lock.ts). Every project has its own password, and a
- * session holds the keys of the projects it has opened: signing in opens the projects that
- * password belongs to, and "Open another project" adds more.
+ * session holds the keys of the projects it has opened: signing in opens the chosen project, and
+ * "Open another project" adds more. Creating a project needs the admin password.
  *
  * The keys are kept for the browser tab (sessionStorage), or on this device (localStorage) when
  * "Keep me signed in" is ticked. Logging out forgets them and removes the log book from this browser.
@@ -14,7 +14,9 @@ import {
   isLegacyLock,
   isLockInfo,
   LOCK_FILE,
+  setProjectName,
   setProjectPassword,
+  unlockAdmin,
   unlockProjects,
   type LockInfo,
   type ProjectKeys,
@@ -109,18 +111,28 @@ export async function addToSession(keys: ProjectKeys): Promise<void> {
   await saveKeys(new Map([...(getDataKeys() ?? []), ...keys]), isRemembered());
 }
 
-/** Give a new project its own password: saved in data/lock.json and opened in this session. */
-export async function addProjectPassword(projectId: string, password: string): Promise<void> {
+/**
+ * Give a new project its own password: saved in data/lock.json (which needs the admin key) and
+ * opened in this session.
+ */
+export async function addProjectPassword(projectId: string, name: string, password: string, adminKey: CryptoKey): Promise<void> {
   let key: CryptoKey | null = null;
   await store.updateLock(async (info) => {
-    if ((await unlockProjects(info, password)).size) {
-      throw new Error('That password already opens another project. Choose a different one, so each project keeps its own.');
+    if ((await unlockProjects(info, password)).size || (await unlockAdmin(info, password))) {
+      throw new Error('That password is already used by another project or the admin. Choose a different one.');
     }
-    const next = await setProjectPassword(info, projectId, password);
+    const next = await setProjectPassword(info, projectId, password, { name });
     key = next.key;
     return next.info;
-  });
+  }, { adminKey });
   await addToSession(new Map([[projectId, key!]]));
+}
+
+/** Keep the name on the sign-in page in step with a renamed project. Quietly does nothing when data/ can't be written. */
+export async function syncProjectName(projectId: string, name: string): Promise<void> {
+  const projectKey = getDataKeys()?.get(projectId);
+  if (!locked || !projectKey || !store.canWriteFiles) return;
+  await store.updateLock((info) => setProjectName(info, projectId, name), { projectKey }).catch(() => undefined);
 }
 
 export async function logout(): Promise<void> {

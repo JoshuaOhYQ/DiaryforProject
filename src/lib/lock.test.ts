@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { checkProjectKey, decryptBytes, encryptBytes, exportKey, importKey, newLock, setProjectPassword, unlockProjects } from './lock.ts';
+import {
+  checkAdminKey,
+  checkProjectKey,
+  decryptBytes,
+  encryptBytes,
+  exportKey,
+  importKey,
+  listProjects,
+  newLock,
+  setAdminPassword,
+  setProjectName,
+  setProjectPassword,
+  unlockAdmin,
+  unlockProject,
+  unlockProjects,
+} from './lock.ts';
 
 describe('lock', () => {
   it('opens a project with its own password only', async () => {
@@ -27,5 +42,35 @@ describe('lock', () => {
     expect(await checkProjectKey(changed.info, 'a', restored)).toBe(false);
     expect((await unlockProjects(changed.info, 'pw')).size).toBe(0);
     expect((await unlockProjects(changed.info, 'new pw')).has('a')).toBe(true);
+  });
+
+  it('opens only the chosen project, and lists projects by their public name', async () => {
+    let lock = newLock();
+    ({ info: lock } = await setProjectPassword(lock, 'a', 'shared pw', { name: 'Zebra' }));
+    ({ info: lock } = await setProjectPassword(lock, 'b', 'shared pw', { name: 'Apple' }));
+    expect(await unlockProject(lock, 'a', 'wrong')).toBeNull();
+    expect(await checkProjectKey(lock, 'a', (await unlockProject(lock, 'a', 'shared pw'))!)).toBe(true);
+    expect(listProjects(lock)).toEqual([
+      { id: 'b', name: 'Apple' },
+      { id: 'a', name: 'Zebra' },
+    ]);
+
+    // A new password keeps the name; renaming keeps the keys.
+    ({ info: lock } = await setProjectPassword(lock, 'a', 'new pw'));
+    expect(lock.projects.a.name).toBe('Zebra');
+    const renamed = setProjectName(lock, 'a', 'Yak');
+    expect(renamed.projects.a).toEqual({ ...lock.projects.a, name: 'Yak' });
+  });
+
+  it('checks the admin password, which opens no project', async () => {
+    let lock = newLock();
+    expect(await unlockAdmin(lock, 'anything')).toBeNull(); // none set yet
+    ({ info: lock } = await setProjectPassword(lock, 'a', 'project pw'));
+    lock = await setAdminPassword(lock, 'admin pw');
+    expect(await unlockAdmin(lock, 'project pw')).toBeNull();
+    const admin = await unlockAdmin(lock, 'admin pw');
+    expect(admin).not.toBeNull();
+    expect(await checkAdminKey(lock, await importKey(await exportKey(admin!)))).toBe(true);
+    expect((await unlockProjects(lock, 'admin pw')).size).toBe(0);
   });
 });

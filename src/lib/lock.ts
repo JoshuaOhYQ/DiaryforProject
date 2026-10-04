@@ -3,15 +3,19 @@
  *
  * Every project has its own random data key, which encrypts that project's files (AES-256-GCM).
  * lock.json holds each data key wrapped (encrypted) with a key derived from that project's
- * password (PBKDF2), so a password opens only its own project. All projects share one salt, so
- * signing in derives a key once and then tries it on each project.
+ * password (PBKDF2), so a password opens only its own project. It also lists each project's name
+ * (public, for the sign-in page) and a check for the admin password, which is needed to create
+ * projects but opens none of them.
  *
  *   { "v": 2, "salt": "...", "iterations": 600000,
- *     "projects": { "<projectId>": { "key": "<wrapped data key>", "check": "<proves the data key>" } } }
+ *     "admin": { "check": "<proves the admin password>" },
+ *     "projects": { "<projectId>": { "name": "PIPER", "key": "<wrapped data key>", "check": "<proves the data key>" } } }
  *
  * Uses Web Crypto only, so the same code runs in the browser and in Node (the Vite plugin, scripts).
  */
 export interface ProjectLock {
+  /** Shown on the sign-in page, so anyone can read it. */
+  name?: string;
   /** base64 of the project's data key, encrypted with its password key. */
   key: string;
   /** base64 of a known string encrypted with the data key, so a remembered key can be checked. */
@@ -23,6 +27,8 @@ export interface LockInfo {
   /** base64 */
   salt: string;
   iterations: number;
+  /** base64 of a known string encrypted with the admin password's key. Missing = no admin password set yet. */
+  admin?: { check: string };
   projects: Record<string, ProjectLock>;
 }
 
@@ -38,6 +44,15 @@ export interface LegacyLockInfo {
 export type ProjectKeys = Map<string, CryptoKey>;
 
 export const LOCK_FILE = 'lock.json';
+/** Headers proving, to the dev server, the admin password (to add a project) or a project's key (to rename it). */
+export const ADMIN_HEADER = 'X-Logbook-Admin-Key';
+export const PROJECT_HEADER = 'X-Logbook-Project-Key';
+
+/** What the app sends with a lock.json change: the admin key, or the key of the project being renamed. */
+export interface LockProof {
+  adminKey?: CryptoKey;
+  projectKey?: CryptoKey;
+}
 export const ENC_SUFFIX = '.enc';
 const CHECK_TEXT = 'project-logbook';
 const IV_BYTES = 12;
@@ -109,6 +124,14 @@ export async function newDataKey(): Promise<CryptoKey> {
 }
 
 const checkText = (projectId: string) => `${CHECK_TEXT}:${projectId}`;
+const ADMIN_TEXT = `${CHECK_TEXT}:admin`;
+
+/** The projects for the sign-in page, sorted by name. */
+export function listProjects(info: LockInfo): { id: string; name: string }[] {
+  return Object.entries(info.projects)
+    .map(([id, p]) => ({ id, name: p.name?.trim() || `Unnamed project (${id.slice(-6)})` }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
 
 /**
  * Give a project a password: returns the updated lock and the project's (new) data key.
@@ -118,16 +141,59 @@ export async function setProjectPassword(
   info: LockInfo,
   projectId: string,
   password: string | CryptoKey,
-  dataKey?: CryptoKey,
+  { dataKey, name }: { dataKey?: CryptoKey; name?: string } = {},
 ): Promise<{ info: LockInfo; key: CryptoKey }> {
   const wrapKey = typeof password === 'string' ? await passwordKey(info, password) : password;
   const key = dataKey ?? (await newDataKey());
   const raw = new Uint8Array(await subtle().exportKey('raw', key));
+  const label = name ?? info.projects[projectId]?.name;
   const entry: ProjectLock = {
+    ...(label ? { name: label } : {}),
     key: toBase64(await encryptBytes(wrapKey, raw)),
     check: toBase64(await encryptBytes(key, new TextEncoder().encode(checkText(projectId)))),
   };
   return { info: { ...info, projects: { ...info.projects, [projectId]: entry } }, key };
+}
+
+/** Change the name shown on the sign-in page. */
+export function setProjectName(info: LockInfo, projectId: string, name: string): LockInfo {
+  const entry = info.projects[projectId];
+  return entry ? { ...info, projects: { ...info.projects, [projectId]: { ...entry, name } } } : info;
+}
+
+/** The data key of one project, or null if the password is not that project's. */
+export async function unlockProject(info: LockInfo, projectId: string, password: string): Promise<CryptoKey | null> {
+  const entry = info.projects[projectId];
+  if (!entry) return null;
+  try {
+    const key = await importKey(toBase64(await decryptBytes(await passwordKey(info, password), fromBase64(entry.key))));
+    return (await checkProjectKey(info, projectId, key)) ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Set (or replace) the admin password, which is needed to create projects. */
+export async function setAdminPassword(info: LockInfo, password: string): Promise<LockInfo> {
+  const key = await passwordKey(info, password);
+  return { ...info, admin: { check: toBase64(await encryptBytes(key, new TextEncoder().encode(ADMIN_TEXT))) } };
+}
+
+/** The admin key for this password, or null if it is wrong (or no admin password is set). */
+export async function unlockAdmin(info: LockInfo, password: string): Promise<CryptoKey | null> {
+  if (!info.admin) return null;
+  const key = await passwordKey(info, password);
+  return (await checkAdminKey(info, key)) ? key : null;
+}
+
+/** True if `key` comes from the admin password (the dev server checks this before adding a project). */
+export async function checkAdminKey(info: LockInfo, key: CryptoKey): Promise<boolean> {
+  if (!info.admin) return false;
+  try {
+    return new TextDecoder().decode(await decryptBytes(key, fromBase64(info.admin.check))) === ADMIN_TEXT;
+  } catch {
+    return false;
+  }
 }
 
 /** The data keys of every project this password opens (empty if it opens none). */

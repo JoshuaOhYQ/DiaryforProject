@@ -11,7 +11,7 @@
  * loading with calls to that backend and keep the same public methods.
  */
 import type { AttachmentRef, CollectionName, Project, RecordOf, Workspace } from '../types.ts';
-import type { LockInfo } from '../lib/lock.ts';
+import type { LockInfo, LockProof } from '../lib/lock.ts';
 import { newId, nowStamp } from '../lib/id.ts';
 import { applyChanges, type Changes } from './changes.ts';
 import type { LocalDb } from './localDb.ts';
@@ -77,6 +77,7 @@ export class LogbookStore {
   private dirty = false;
   private lastPull = 0;
   private channel: BroadcastChannel | null = null;
+  private starting: Promise<void> | null = null;
   private readonly opts: StoreOptions;
 
   constructor(opts: StoreOptions) {
@@ -118,7 +119,12 @@ export class LogbookStore {
 
   // ---- start-up ------------------------------------------------------------
 
-  async init(): Promise<void> {
+  /** Load the log book and start saving. Safe to call again: later calls wait for the first. */
+  init(): Promise<void> {
+    return (this.starting ??= this.start());
+  }
+
+  private async start(): Promise<void> {
     const { db } = this.opts;
     let ws = this.visible((await db.loadWorkspace()) ?? emptyWorkspace());
 
@@ -374,14 +380,20 @@ export class LogbookStore {
 
   // ---- locked log book -----------------------------------------------------
 
-  /** Change data/lock.json (e.g. add a new project's password). Needs a writable target. */
-  async updateLock(change: (info: LockInfo) => Promise<LockInfo>): Promise<void> {
+  /** True when changes reach data/ (dev server or connected folder), not just this browser. */
+  get canWriteFiles(): boolean {
+    return !!this.target?.writable;
+  }
+
+  /** Change data/lock.json (add a project, rename one). Needs a writable target. */
+  async updateLock(change: (info: LockInfo) => LockInfo | Promise<LockInfo>, proof?: LockProof): Promise<void> {
     const target = this.target;
     if (!target?.writable) throw new Error('Run `npm run dev` or connect the data folder first, so the new password can be saved.');
     // Read it fresh: a git pull may have added another project's password since sign-in.
     const info = await target.readLock();
     if (!info) throw new Error('data/lock.json is missing or out of date. Run `npm run lock` in the repo.');
-    await target.writeLock(await change(info));
+    const next = await change(info);
+    if (JSON.stringify(next) !== JSON.stringify(info)) await target.writeLock(next, proof);
   }
 
   /** Save what is pending, then remove the log book from this browser (used when logging out). */
