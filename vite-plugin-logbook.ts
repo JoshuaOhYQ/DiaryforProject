@@ -7,16 +7,22 @@
  *   PUT  /__logbook/asset/<name>   body = file bytes      -> data/assets/<name>
  *
  * This only exists while `npm run dev` is running, so the deployed site stays a static site.
+ *
+ * With `password` set, the build publishes data/ encrypted (`<file>.enc` + `lock.json`, see
+ * src/lib/lock.ts) and the site asks for the password before showing anything.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
+import { createLock, encryptBytes, ENC_SUFFIX, LOCK_FILE } from './src/lib/lock.ts';
 
 interface Options {
   dataDir?: string;
   /** Copy data/ into the build so the deployed site shows the committed log book. */
   publishData?: boolean;
+  /** Admin password for the published site. Without it, data/ is published as plain files. */
+  password?: string;
 }
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,150}$/;
@@ -100,10 +106,24 @@ export function logbookFiles(options: Options = {}): Plugin {
         next();
       });
     },
-    closeBundle() {
-      if (options.publishData === false) return;
+    async closeBundle() {
       const src = path.resolve(root, dataDirName);
-      if (fs.existsSync(src)) fs.cpSync(src, path.join(outDir, dataDirName), { recursive: true });
+      const dest = path.join(outDir, dataDirName);
+      if (!options.password) {
+        if (options.publishData !== false && fs.existsSync(src)) fs.cpSync(src, dest, { recursive: true });
+        return;
+      }
+      const { info, key } = await createLock(options.password);
+      fs.mkdirSync(dest, { recursive: true });
+      fs.writeFileSync(path.join(dest, LOCK_FILE), JSON.stringify(info));
+      if (options.publishData === false || !fs.existsSync(src)) return;
+      for (const rel of fs.readdirSync(src, { recursive: true, encoding: 'utf8' })) {
+        const file = path.join(src, rel);
+        if (path.basename(rel).startsWith('.') || rel.endsWith('.tmp') || !fs.statSync(file).isFile()) continue;
+        const out = path.join(dest, rel + ENC_SUFFIX);
+        fs.mkdirSync(path.dirname(out), { recursive: true });
+        fs.writeFileSync(out, await encryptBytes(key, new Uint8Array(fs.readFileSync(file))));
+      }
     },
   };
 }

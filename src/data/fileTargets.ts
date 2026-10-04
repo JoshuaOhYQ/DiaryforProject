@@ -5,6 +5,8 @@
  *  - folder      deployed site in Chrome/Edge: you pick the repo's data/ folder once and the app writes there.
  *  - static      deployed site, read-only: shows the log book that was committed when the site was built.
  */
+import { decryptBytes, ENC_SUFFIX } from '../lib/lock.ts';
+
 export type TargetKind = 'dev-server' | 'folder' | 'static';
 
 export interface FileTarget {
@@ -30,9 +32,36 @@ async function fetchOrNull(url: string): Promise<Response | null> {
   }
 }
 
+/** Set after the login page unlocks a password-protected site; the published files are then `.enc`. */
+let dataKey: CryptoKey | null = null;
+export function setDataKey(key: CryptoKey | null) {
+  dataKey = key;
+}
+
+const MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  pdf: 'application/pdf',
+};
+
+async function fetchDecrypted(file: string): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!dataKey) return null;
+  const res = await fetchOrNull(dataUrl(file + ENC_SUFFIX));
+  if (!res) return null;
+  return decryptBytes(dataKey, new Uint8Array(await res.arrayBuffer())).catch(() => null);
+}
+
 function staticReads() {
   return {
     async readWorkspace() {
+      if (dataKey) {
+        const bytes = await fetchDecrypted('logbook.json');
+        return bytes ? new TextDecoder().decode(bytes) : null;
+      }
       const res = await fetchOrNull(dataUrl('logbook.json'));
       if (!res) return null;
       const text = await res.text();
@@ -40,6 +69,11 @@ function staticReads() {
       return text.trimStart().startsWith('{') ? text : null;
     },
     async readAsset(file: string) {
+      if (dataKey) {
+        const bytes = await fetchDecrypted(file);
+        const ext = file.split('.').pop()?.toLowerCase() ?? '';
+        return bytes ? new Blob([bytes], { type: MIME[ext] ?? 'application/octet-stream' }) : null;
+      }
       const res = await fetchOrNull(dataUrl(file));
       return res ? res.blob() : null;
     },

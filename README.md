@@ -138,8 +138,27 @@ doesn't say how long it took, so edit that entry and set them.
 The deployed site is a static copy: it shows the log book as it was when it was built, and
 each visitor's own changes stay in their browser unless they connect the data folder.
 
-**Privacy:** the build includes `data/`, so if the GitHub repo or the site is public, the log book
-is public too. To deploy an empty app, set `LOGBOOK_PUBLISH_DATA=false` when building.
+**Admin password.** When `LOGBOOK_PASSWORD` is set at build time, the site opens on a sign-in page
+and the published `data/` is encrypted with that password (AES-256-GCM, key from PBKDF2), so
+fetching `data/logbook.json.enc` directly gives nothing readable. Everyone on the team uses the
+same password; *Keep me signed in* remembers it on that device, and the log-out button in the top
+bar forgets it. Changing the password and redeploying signs everyone out. `npm run dev` never asks
+for it.
+
+- **GitHub Pages**: add the password as a repository secret named `LOGBOOK_PASSWORD`
+  (*Settings → Secrets and variables → Actions*). The deploy fails without it, so the log book is
+  never published unencrypted.
+- **Vercel**: add `LOGBOOK_PASSWORD` under *Project → Settings → Environment Variables*.
+- **Local build**: put `LOGBOOK_PASSWORD=...` in `.env.local` (ignored by Git), or set it in the
+  terminal, before `npm run build`.
+
+Use a long password: anyone can download the encrypted file and try passwords offline.
+
+**Privacy:** the password protects the *deployed site* only. `data/logbook.json` is committed in
+plain text, so if the GitHub repo is public, anyone can read it there (including old versions in
+the history). Make the repo private to keep the log book private. GitHub Pages from a private repo
+needs GitHub Pro, which is free for students (GitHub Student Developer Pack); Vercel deploys
+private repos on its free plan. To deploy an empty app, set `LOGBOOK_PUBLISH_DATA=false` when building.
 
 - **GitHub Pages**: push to `main`, then in the repo go to *Settings → Pages → Source:
   GitHub Actions*. The workflow in `.github/workflows/deploy.yml` tests, builds and publishes on

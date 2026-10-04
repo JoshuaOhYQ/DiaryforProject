@@ -23,3 +23,4 @@ export * from './factories.ts';
 export { selectProject, type ProjectData } from './select.ts';
 export { extractProject, parseWorkspace, serializeWorkspace, DEFAULT_ENTRY_TYPES, FEATURE_STATUSES, PALETTE } from './workspace.ts';
 export { parseLogbookText } from './merge.ts';
+export { setDataKey } from './fileTargets.ts';

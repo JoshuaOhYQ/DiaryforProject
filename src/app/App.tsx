@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
-import { BookOpenText, CalendarRange, LayoutDashboard, Monitor, Moon, NotebookPen, Plus, ScrollText, Settings, Sun, Users } from 'lucide-react';
+import { BookOpenText, CalendarRange, LayoutDashboard, LogOut, Monitor, Moon, NotebookPen, Plus, ScrollText, Settings, Sun, Users } from 'lucide-react';
 import type { Entry } from '../types.ts';
 import { newEntry, selectProject, store, useSaveStatus, useWorkspace, type ProjectData, type SaveStatus } from '../data/index.ts';
 import { todayISO } from '../lib/dates.ts';
@@ -15,6 +15,7 @@ import { SettingsPage } from '../pages/SettingsPage.tsx';
 import { TeamPage } from '../pages/TeamPage.tsx';
 import { WelcomePage } from '../pages/WelcomePage.tsx';
 import { AppActionsContext, EntryEditorContext, ProjectContext, type AppActions, type EntryEditor } from './context.ts';
+import { isLockedSite, logout } from './auth.ts';
 import { href, navigate, useRoute } from './router.ts';
 import { setThemeMode, useThemeMode } from './theme.ts';
 import { Toasts } from './toast.tsx';
@@ -173,6 +174,11 @@ export function App() {
                 <div className="topbar-actions">
                   <SaveIndicator status={status} />
                   <ThemeButton />
+                  {isLockedSite() && (
+                    <button className="btn ghost icon" onClick={logout} title="Log out" aria-label="Log out">
+                      <LogOut size={18} />
+                    </button>
+                  )}
                   <button className="btn primary hide-mobile" onClick={() => editor.openNew()}>
                     <Plus size={16} /> Entry <kbd>N</kbd>
                   </button>

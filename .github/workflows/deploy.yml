@@ -1,7 +1,9 @@
 # Publishes the app to GitHub Pages on every push to main.
 # One-time setup: repo Settings → Pages → Source: "GitHub Actions".
-# The committed data/logbook.json is published with the site; set LOGBOOK_PUBLISH_DATA
-# to 'false' below to publish an empty app instead (e.g. for a public repo).
+# The committed data/logbook.json is published with the site, encrypted with the admin password
+# in the LOGBOOK_PASSWORD secret (Settings → Secrets and variables → Actions → New repository secret).
+# The site asks for that password before showing anything. Set LOGBOOK_PUBLISH_DATA to 'false'
+# below to publish an empty app instead.
 name: Deploy to GitHub Pages
 
 on:
@@ -29,9 +31,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Check the admin password is set
+        run: |
+          if [ -z "$LOGBOOK_PASSWORD" ]; then
+            echo "::error::Add a LOGBOOK_PASSWORD repository secret so the published log book is password-protected."
+            exit 1
+          fi
+        env:
+          LOGBOOK_PASSWORD: ${{ secrets.LOGBOOK_PASSWORD }}
       - run: npm run build
         env:
           LOGBOOK_PUBLISH_DATA: 'true'
+          LOGBOOK_PASSWORD: ${{ secrets.LOGBOOK_PASSWORD }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
