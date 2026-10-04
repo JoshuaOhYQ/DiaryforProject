@@ -54,6 +54,8 @@ export interface ThemeColors {
   surface3: string;
   border: string;
   borderStrong: string;
+  /** Faint chart gridlines. */
+  grid: string;
   text: string;
   text2: string;
   muted: string;
@@ -70,6 +72,7 @@ const VARS: Record<keyof ThemeColors, string> = {
   surface3: '--surface-3',
   border: '--border',
   borderStrong: '--border-strong',
+  grid: '--grid',
   text: '--text',
   text2: '--text-2',
   muted: '--muted',
@@ -87,6 +90,7 @@ export const LIGHT_COLORS: ThemeColors = {
   surface3: '#e3e7ec',
   border: '#dde2e8',
   borderStrong: '#c3cbd4',
+  grid: '#e6e9ee',
   text: '#1b2430',
   text2: '#445061',
   muted: '#687384',

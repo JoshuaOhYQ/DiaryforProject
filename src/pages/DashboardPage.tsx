@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState, type FocusEvent, type PointerEvent, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type FocusEvent, type PointerEvent, type ReactNode } from 'react';
 import { AlertTriangle, BookOpenText, CalendarClock, CheckCircle2, CircleAlert, Plus, Table2 } from 'lucide-react';
 import type { Task } from '../types.ts';
 import { useEntryEditor, useProject } from '../app/context.ts';
 import { href } from '../app/router.ts';
 import { useResolvedTheme, useThemeColors } from '../app/theme.ts';
 import { Swatch } from '../components/Chips.tsx';
+import { CountUp } from '../components/CountUp.tsx';
 import { displayColour, NEUTRAL } from '../lib/colours.ts';
 import { addDays, diffDays, formatDate, MONTHS_SHORT, relativeDays, startOfWeek, todayISO } from '../lib/dates.ts';
 import { daysSinceLastEntry, recentWeeks, tallyBy, weeklyByMember, NO_FEATURE, type WeekCell } from '../lib/stats.ts';
@@ -173,7 +174,9 @@ function StatTile({ label, value, note, status }: { label: string; value: string
   return (
     <div className="card stat-tile">
       <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
+      <div className="stat-value">
+        <CountUp value={value} />
+      </div>
       {note && (
         <div className={`stat-note${status ? ` ${status}` : ''}`}>
           {status === 'critical' && <CircleAlert size={14} />}
@@ -255,6 +258,8 @@ function MiniColumns({ cells, max, colour, name }: { cells: WeekCell[]; max: num
   const c = useThemeColors();
   const fill = displayColour(colour, theme);
   const { wrap, show, hide, node } = useTip();
+  // useId() contains characters like «» that don't work inside url(#...).
+  const gradient = `cols-${useId().replace(/[^A-Za-z0-9]/g, '')}`;
   const W = 300;
   const plotTop = 16;
   const plotH = 70;
@@ -268,7 +273,13 @@ function MiniColumns({ cells, max, colour, name }: { cells: WeekCell[]; max: num
   return (
     <div ref={wrap} className="viz-wrap" onPointerLeave={hide}>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`${name}: hours per week`} style={{ display: 'block', overflow: 'visible' }}>
-        <line x1={0} x2={W} y1={plotTop + 0.5} y2={plotTop + 0.5} stroke={c.border} />
+        <defs>
+          <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={fill} />
+            <stop offset="1" stopColor={fill} stopOpacity={0.35} />
+          </linearGradient>
+        </defs>
+        <line x1={0} x2={W} y1={plotTop + 0.5} y2={plotTop + 0.5} stroke={c.grid} />
         <text x={0} y={plotTop - 4} fontSize={10} fill={c.muted}>
           {formatNumber(Math.round(max * 10) / 10)} h
         </text>
@@ -293,7 +304,7 @@ function MiniColumns({ cells, max, colour, name }: { cells: WeekCell[]; max: num
               {cell.hours > 0 && (
                 <path
                   d={`M${x},${base} V${top + r} Q${x},${top} ${x + r},${top} H${x + colW - r} Q${x + colW},${top} ${x + colW},${top + r} V${base} Z`}
-                  fill={fill}
+                  fill={`url(#${gradient})`}
                 />
               )}
             </g>
