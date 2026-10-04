@@ -6,8 +6,8 @@
  *   npm run seed -- --import docs/my-log.md        import a different log
  *   npm run seed -- --force                        overwrite an existing data/logbook.json
  *
- * If the log book is locked (data/lock.json), it writes the encrypted data/logbook.json.enc
- * using LOGBOOK_PASSWORD from .env.local.
+ * If the log book is locked (data/lock.json), the new project is written to a plain
+ * data/logbook.json for `npm run lock` to encrypt with its own password.
  *
  * Runs on plain Node (22.18 or newer understands TypeScript directly).
  */
@@ -18,8 +18,8 @@ import { emptyWorkspace, serializeWorkspace } from '../src/data/workspace.ts';
 import { selectProject } from '../src/data/select.ts';
 import { instantiateTemplate, TEMPLATES } from '../src/templates/index.ts';
 import { parseMarkdownLog, toEntry } from '../src/import/markdownLog.ts';
-import { SEALED_WORKSPACE_FILE, WORKSPACE_FILE } from '../src/data/sealed.ts';
-import { dataKey, isLocked, writeWorkspaceFile } from './dataLock.ts';
+import { WORKSPACE_FILE } from '../src/data/sealed.ts';
+import { isLocked, writeWorkspaceFile } from './dataLock.ts';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(`--${name}`);
@@ -29,8 +29,7 @@ const option = (name: string) => {
 };
 
 const root = path.resolve(import.meta.dirname, '..');
-const key = isLocked() ? await dataKey() : undefined;
-const out = path.join(root, 'data', key ? SEALED_WORKSPACE_FILE : WORKSPACE_FILE);
+const out = path.join(root, 'data', WORKSPACE_FILE);
 const templateKey = option('template') ?? 'piper';
 const imports = option('import') ? [option('import')!] : templateKey === 'piper' ? ['docs/WORK_LOG_smart_home.md'] : [];
 
@@ -67,5 +66,6 @@ const entries = imports.flatMap((file) => {
 });
 
 ws = applyChanges(ws, { put: { entries } }, now);
-await writeWorkspaceFile(serializeWorkspace(ws), path.dirname(out), key);
+writeWorkspaceFile(serializeWorkspace(ws), path.dirname(out));
 console.log(`Wrote ${path.relative(root, out)}: "${data.project.name}" with ${data.members.length} members, ${data.features.length} features, ${data.tasks.length} tasks, ${entries.length} imported entries.`);
+if (isLocked()) console.log('The log book is locked: run `npm run lock` to encrypt this project with its own password.');

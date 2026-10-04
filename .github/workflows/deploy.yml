@@ -1,9 +1,10 @@
 # Publishes the app to GitHub Pages on every push to main.
 # One-time setup: repo Settings → Pages → Source: "GitHub Actions".
-# The log book is committed encrypted (`npm run lock`: data/lock.json + .enc files) and published
-# as it is; the site asks for the team password before showing anything. If the repo holds a plain
-# data/logbook.json instead, the deploy encrypts it with the LOGBOOK_PASSWORD repository secret,
-# and refuses to publish when neither is there. Set LOGBOOK_PUBLISH_DATA to 'false' below to
+# The log book is committed encrypted (`npm run lock`: data/lock.json + data/projects/*/.enc files,
+# one password per project) and published as it is; the site asks for a project password before
+# showing anything. If the repo holds a plain data/logbook.json instead, the deploy encrypts it with
+# the LOGBOOK_PASSWORD repository secret (one password for every project), and refuses to publish
+# when neither is there. Set LOGBOOK_PUBLISH_DATA to 'false' below to
 # publish an empty app instead.
 name: Deploy to GitHub Pages
 

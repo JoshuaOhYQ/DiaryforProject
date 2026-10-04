@@ -7,6 +7,7 @@ import { getPref, setPref } from '../lib/prefs.ts';
 import { EntryForm } from '../components/EntryForm.tsx';
 import { Modal } from '../components/Modal.tsx';
 import { NewProjectDialog } from '../components/NewProjectDialog.tsx';
+import { UnlockProjectDialog } from '../components/UnlockProjectDialog.tsx';
 import { DashboardPage } from '../pages/DashboardPage.tsx';
 import { EntriesPage } from '../pages/EntriesPage.tsx';
 import { GanttPage } from '../pages/GanttPage.tsx';
@@ -67,6 +68,7 @@ export function App() {
   const [projectId, setProjectId] = useState<string | null>(() => getPref('project', null));
   const [editing, setEditing] = useState<{ entry: Entry; isNew: boolean } | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
 
   const data = selectProject(ws, projectId) ?? selectProject(ws, ws.projects[0]?.id ?? null);
 
@@ -153,7 +155,12 @@ export function App() {
                     className="project-select"
                     aria-label="Project"
                     value={data.project.id}
-                    onChange={(e) => (e.target.value === '__new' ? setCreatingProject(true) : switchProject(e.target.value))}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === '__new') setCreatingProject(true);
+                      else if (v === '__unlock') setUnlocking(true);
+                      else switchProject(v);
+                    }}
                   >
                     {ws.projects.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -161,6 +168,7 @@ export function App() {
                       </option>
                     ))}
                     <option value="__new">＋ New project…</option>
+                    {isLockedSite() && <option value="__unlock">Open another project…</option>}
                   </select>
                 </div>
                 <nav className="nav" aria-label="Main">
@@ -175,7 +183,7 @@ export function App() {
                   <SaveIndicator status={status} />
                   <ThemeButton />
                   {isLockedSite() && (
-                    <button className="btn ghost icon" onClick={logout} title="Log out" aria-label="Log out">
+                    <button className="btn ghost icon" onClick={() => confirmLogout(status)} title="Log out" aria-label="Log out">
                       <LogOut size={18} />
                     </button>
                   )}
@@ -218,6 +226,8 @@ export function App() {
             </Modal>
           )}
 
+          {unlocking && <UnlockProjectDialog onClose={() => setUnlocking(false)} />}
+
           {creatingProject && (
             <NewProjectDialog
               current={data}
@@ -235,6 +245,13 @@ export function App() {
       </AppActionsContext.Provider>
     </ProjectContext.Provider>
   );
+}
+
+/** Logging out also removes the log book from this browser, which loses changes that never reached a file. */
+function confirmLogout(status: SaveStatus) {
+  const onlyHere = status.target === 'none';
+  if (onlyHere && !confirm('Log out? Changes you made on this device that were not downloaded as a backup are removed from this browser.')) return;
+  void logout();
 }
 
 function useNow(intervalMs: number): number {

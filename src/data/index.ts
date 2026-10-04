@@ -4,9 +4,10 @@
 import { useSyncExternalStore } from 'react';
 import { openLocalDb } from './localDb.ts';
 import { LogbookStore, type SaveStatus } from './store.ts';
+import { dataScope } from './fileTargets.ts';
 import type { Workspace } from '../types.ts';
 
-export const store = new LogbookStore({ db: openLocalDb() });
+export const store = new LogbookStore({ db: openLocalDb(), scope: dataScope });
 
 export function useWorkspace(): Workspace {
   return useSyncExternalStore(store.subscribe, store.getState);
@@ -23,4 +24,4 @@ export * from './factories.ts';
 export { selectProject, type ProjectData } from './select.ts';
 export { extractProject, parseWorkspace, serializeWorkspace, DEFAULT_ENTRY_TYPES, FEATURE_STATUSES, PALETTE } from './workspace.ts';
 export { parseLogbookText } from './merge.ts';
-export { setDataKey } from './fileTargets.ts';
+export { getDataKeys, setDataKeys } from './fileTargets.ts';

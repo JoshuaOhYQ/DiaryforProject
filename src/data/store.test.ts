@@ -30,6 +30,10 @@ function memoryTarget(initial: string | null = null) {
     async writeAsset(file, blob) {
       files.set(file, blob);
     },
+    async readLock() {
+      return null;
+    },
+    async writeLock() {},
   };
   return { target, files };
 }
@@ -172,5 +176,22 @@ describe('LogbookStore', () => {
     await store.flush();
     expect(target.text).toBe('{ this is not json');
     expect(store.getStatus().error).toMatch(/not valid JSON/);
+  });
+
+  it('keeps out projects this session has no password for', async () => {
+    const mine = newProject({ name: 'Mine' });
+    const other = newProject({ name: 'Other' });
+    const db = openLocalDb(`test-${++dbCount}`);
+    // A copy left in the browser by an earlier sign-in to the other project.
+    await db.replace(applyChanges(emptyWorkspace(), { put: { projects: [other] } }, '2026-10-01T00:00:00.000Z'));
+    const store = new LogbookStore({ db, detectTarget: async () => null, snapshot: null, debounceMs: 5, channelName: null, scope: () => new Set([mine.id]) });
+    await store.init();
+    expect(store.getState().projects).toEqual([]);
+
+    const backup = applyChanges(emptyWorkspace(), { put: { projects: [mine, other], entries: [newEntry(other.id, { did: 'secret' })] } }, '2026-10-01T00:00:00.000Z');
+    expect(store.outOfScope(backup).map((p) => p.name)).toEqual(['Other']);
+    store.mergeIn(backup);
+    expect(store.getState().projects.map((p) => p.name)).toEqual(['Mine']);
+    expect(store.getState().entries).toEqual([]);
   });
 });

@@ -1,10 +1,13 @@
 /** Creating, copying and deleting whole projects. */
 import type { CollectionName, Project, Workspace } from '../types.ts';
 import { store, type ProjectData } from '../data/index.ts';
+import { addProjectPassword } from './auth.ts';
 import { instantiateTemplate, type ProjectTemplate } from '../templates/index.ts';
 
-export function createProject(template: ProjectTemplate, overrides: Partial<Project> = {}): string {
+/** On a locked log book, pass the new project's own password: it is saved in data/lock.json first. */
+export async function createProject(template: ProjectTemplate, overrides: Partial<Project> = {}, password?: string): Promise<string> {
   const { projectId, changes } = instantiateTemplate(template, overrides);
+  if (password !== undefined) await addProjectPassword(projectId, password);
   store.apply(changes);
   return projectId;
 }

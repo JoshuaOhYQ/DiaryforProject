@@ -1,107 +1,292 @@
 /**
  * Encrypt the log book in the repo, so it can be public on GitHub without anyone reading it.
+ * Every project has its own password, so sharing one project's password shares only that project.
  *
- *   npm run lock                  encrypt data/ with LOGBOOK_PASSWORD (the first run creates data/lock.json)
- *   npm run lock -- --rekey       change the password: LOGBOOK_PASSWORD = current, LOGBOOK_NEW_PASSWORD = new
+ *   npm run lock                  encrypt data/: asks for a password for each project that has none yet
+ *                                 (also upgrades the old one-password lock, using LOGBOOK_PASSWORD)
+ *   npm run lock -- --password    change one project's password (asks for the current one, then the new one)
  *   npm run lock -- --decrypt     turn encryption off again (plain data/logbook.json, no lock.json)
  *
- * Passwords are read from the environment or from .env.local (which Git ignores).
+ * Passwords are typed in the terminal. Known ones are also read from LOGBOOK_PASSWORD and
+ * LOGBOOK_PASSWORD_<NAME> in the environment or .env.local (which Git ignores).
  * Encrypting only protects new commits: older commits still hold whatever was committed before.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { createLock, decryptBytes, ENC_SUFFIX, encryptBytes, LOCK_FILE } from '../src/lib/lock.ts';
+import type { Workspace } from '../src/types.ts';
+import {
+  decryptBytes,
+  ENC_SUFFIX,
+  encryptBytes,
+  LOCK_FILE,
+  newLock,
+  setProjectPassword,
+  unlockLegacy,
+  unlockProjects,
+  type LegacyLockInfo,
+  type LockInfo,
+  type ProjectKeys,
+} from '../src/lib/lock.ts';
 import { mergeWorkspaces, parseLogbookText } from '../src/data/merge.ts';
-import { SEALED_WORKSPACE_FILE, WORKSPACE_FILE } from '../src/data/sealed.ts';
-import { serializeWorkspace } from '../src/data/workspace.ts';
-import { dataDir, dataKey, readPassword, readWorkspaceFile, repoRoot, writeWorkspaceFile } from './dataLock.ts';
+import { openWorkspaceText, PROJECTS_DIR, projectAssetPath, SEALED_WORKSPACE_FILE, WORKSPACE_FILE } from '../src/data/sealed.ts';
+import { emptyWorkspace, projectIdsIn, projectSlice, serializeWorkspace } from '../src/data/workspace.ts';
+import {
+  assetOwners,
+  dataDir,
+  knownProjectKeys,
+  readCurrentLock,
+  readLock,
+  readPassword,
+  readPasswords,
+  readProjectFile,
+  readWorkspaceFile,
+  repoRoot,
+  writeProjectFile,
+  writeWorkspaceFile,
+} from './dataLock.ts';
+import { ask, askNewPassword, closePrompt } from './prompt.ts';
 
 const assetsDir = path.join(dataDir, 'assets');
+const projectsDir = path.join(dataDir, PROJECTS_DIR);
 const rel = (file: string) => path.relative(repoRoot, file).split(path.sep).join('/');
+const inData = (relPath: string) => path.join(dataDir, ...relPath.split('/'));
 
-/** Asset files, either all plain ones or all encrypted ones. */
-function assets(encrypted: boolean): string[] {
-  if (!fs.existsSync(assetsDir)) return [];
+/** Files in a folder, either all plain ones or all encrypted ones. */
+function files(dir: string, encrypted: boolean): string[] {
+  if (!fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(assetsDir)
+    .readdirSync(dir)
     .filter((n) => !n.startsWith('.') && !n.endsWith('.tmp') && n.endsWith(ENC_SUFFIX) === encrypted)
-    .map((n) => path.join(assetsDir, n));
+    .map((n) => path.join(dir, n));
 }
 
-/** One clean JSON text from any mix of plain, encrypted and conflicted copies. */
-function combine(texts: (string | null)[]): string | null {
-  const present = texts.filter((t): t is string => !!t?.trim());
-  if (!present.length) return null;
-  return serializeWorkspace(present.map(parseLogbookText).reduce((a, b) => mergeWorkspaces(a, b)));
+const merged = (list: Workspace[]) => list.reduce((a, b) => mergeWorkspaces(a, b), emptyWorkspace());
+
+/** A name for a .env.local variable, e.g. LOGBOOK_PASSWORD_PIPER. */
+function envName(projectName: string): string {
+  const slug = projectName
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 24)
+    .replace(/_+$/, '');
+  return `LOGBOOK_PASSWORD_${slug || 'PROJECT'}`;
 }
 
-function writeLock(info: object) {
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(path.join(dataDir, LOCK_FILE), JSON.stringify(info, null, 2) + '\n');
+/** Ask for an existing project's password until it opens that project (3 tries). */
+async function askProjectKey(lock: LockInfo, id: string, name: string): Promise<CryptoKey> {
+  for (let i = 0; i < 3; i++) {
+    const key = (await unlockProjects(lock, await ask(`Password for "${name}": `, true))).get(id);
+    if (key) return key;
+    console.log('  That password does not open this project.');
+  }
+  throw new Error(`Could not open "${name}".`);
+}
+
+/** Ask for a new password that no other project in `lock` uses. */
+async function askUniquePassword(lock: LockInfo, name: string): Promise<string> {
+  for (;;) {
+    const password = await askNewPassword(`"${name}"`);
+    if (!(await unlockProjects(lock, password)).size) return password;
+    console.log('  That password already opens another project. Choose a different one, so each project keeps its own.');
+  }
+}
+
+/** The key of the old one-password lock, from LOGBOOK_PASSWORD or typed in. */
+async function legacyKey(lock: LegacyLockInfo): Promise<CryptoKey> {
+  for (const password of readPasswords()) {
+    const key = await unlockLegacy(lock, password);
+    if (key) return key;
+  }
+  for (let i = 0; i < 3; i++) {
+    const key = await unlockLegacy(lock, await ask('Current team password (the one used so far): ', true));
+    if (key) return key;
+    console.log('  Wrong password.');
+  }
+  throw new Error('Wrong team password.');
 }
 
 async function encrypt() {
-  const password = readPassword();
-  if (!password) throw new Error('Put LOGBOOK_PASSWORD=<the team password> in .env.local first.');
-  let key: CryptoKey;
-  if (fs.existsSync(path.join(dataDir, LOCK_FILE))) {
-    key = await dataKey();
-  } else {
-    const lock = await createLock(password);
-    writeLock(lock.info);
-    key = lock.key;
-    console.log(`Created ${rel(path.join(dataDir, LOCK_FILE))}.`);
+  const existing = readLock();
+  const legacy = existing?.v === 1 ? existing : null;
+  let lock: LockInfo = existing?.v === 2 ? existing : newLock();
+
+  // Everything not yet in a project's encrypted files: a plain logbook.json and plain screenshots,
+  // or the files of the old one-password lock.
+  const incoming: Workspace[] = [];
+  const looseAssets = new Map<string, Uint8Array<ArrayBuffer>>(); // "assets/x.png" -> bytes
+  const source = new Map<string, string>(); // "assets/x.png" -> file to remove once moved
+  const oldFiles: string[] = [];
+
+  const plain = readWorkspaceFile();
+  if (plain?.trim()) incoming.push(parseLogbookText(plain));
+  if (plain !== null) oldFiles.push(path.join(dataDir, WORKSPACE_FILE));
+  for (const file of files(assetsDir, false)) {
+    looseAssets.set(`assets/${path.basename(file)}`, new Uint8Array(fs.readFileSync(file)));
+    source.set(`assets/${path.basename(file)}`, file);
+  }
+  if (legacy) {
+    const oldKey = await legacyKey(legacy);
+    const sealed = path.join(dataDir, SEALED_WORKSPACE_FILE);
+    if (fs.existsSync(sealed)) {
+      incoming.push(parseLogbookText(await openWorkspaceText(oldKey, fs.readFileSync(sealed, 'utf8'))));
+      oldFiles.push(sealed);
+    }
+    for (const file of files(assetsDir, true)) {
+      const name = `assets/${path.basename(file, ENC_SUFFIX)}`;
+      looseAssets.set(name, await decryptBytes(oldKey, new Uint8Array(fs.readFileSync(file))));
+      source.set(name, file);
+    }
   }
 
-  const plainFile = path.join(dataDir, WORKSPACE_FILE);
-  const json = combine([await readWorkspaceFile(dataDir), await readWorkspaceFile(dataDir, key)]);
-  if (json) {
-    console.log(`Encrypted ${rel(await writeWorkspaceFile(json, dataDir, key))}.`);
-    fs.rmSync(plainFile, { force: true });
+  const ws = merged(incoming);
+  const ids = projectIdsIn(ws);
+  if (!existing && !ids.size) throw new Error('There is no log book to encrypt yet. Create a project first (npm run dev), then run this again.');
+  if (existing?.v === 2 && !ids.size && !looseAssets.size) {
+    console.log('Everything in data/ is already encrypted. To change a password: npm run lock -- --password');
+    return;
   }
-  for (const file of assets(false)) {
-    fs.writeFileSync(file + ENC_SUFFIX, await encryptBytes(key, new Uint8Array(fs.readFileSync(file))));
-    fs.rmSync(file);
-    console.log(`Encrypted ${rel(file)}.`);
+
+  const names = new Map(ws.projects.map((p) => [p.id, p.name]));
+  const nameOf = (id: string) => names.get(id) ?? `project ${id}`;
+  const known = existing?.v === 2 ? await knownProjectKeys(lock) : new Map<string, CryptoKey>();
+  const keys: ProjectKeys = new Map();
+  const added: string[] = [];
+  const keyFor = async (id: string) => {
+    if (!keys.has(id)) keys.set(id, known.get(id) ?? (await askProjectKey(lock, id, nameOf(id))));
+    return keys.get(id)!;
+  };
+
+  // Work out every project's new contents first; nothing is written until all passwords are in.
+  const slices: { id: string; ws: Workspace }[] = [];
+  for (const id of ids) {
+    let slice = projectSlice(ws, id);
+    if (lock.projects[id]) {
+      const current = await readProjectFile(dataDir, id, await keyFor(id));
+      if (current) slice = mergeWorkspaces(parseLogbookText(current), slice);
+    } else {
+      if (!added.length) console.log('Each project gets its own password. Only people with a project’s password can open it.\n');
+      const next = await setProjectPassword(lock, id, await askUniquePassword(lock, nameOf(id)));
+      lock = next.info;
+      keys.set(id, next.key);
+      added.push(id);
+    }
+    slices.push({ id, ws: slice });
   }
-  console.log('\nDone. Commit data/ (git add -A data). Only lock.json and .enc files should be in it.');
+
+  // Screenshots go to the project of the entry they are attached to.
+  const owners = assetOwners(merged([ws, ...slices.map((s) => s.ws)]));
+  const assets: { file: string; id: string; bytes: Uint8Array<ArrayBuffer> }[] = [];
+  const unowned: string[] = [];
+  for (const [file, bytes] of looseAssets) {
+    const id = owners.get(file);
+    if (id && lock.projects[id]) assets.push({ file, id, bytes: await encryptBytes(await keyFor(id), bytes) });
+    else unowned.push(file);
+  }
+
+  for (const s of slices) console.log(`Encrypted ${rel(await writeProjectFile(dataDir, s.id, keys.get(s.id)!, s.ws))} ("${nameOf(s.id)}").`);
+  for (const a of assets) {
+    const out = inData(projectAssetPath(a.id, a.file));
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, a.bytes);
+  }
+  if (assets.length) console.log(`Encrypted ${assets.length} screenshot(s) into their projects' folders.`);
+  fs.writeFileSync(path.join(dataDir, LOCK_FILE), JSON.stringify(lock, null, 2) + '\n');
+  for (const file of oldFiles) fs.rmSync(file, { force: true });
+  for (const a of assets) fs.rmSync(source.get(a.file)!, { force: true });
+  for (const file of unowned) console.log(`Left ${rel(source.get(file)!)} where it is: no entry uses it.`);
+
+  console.log('\nDone. Commit data/ (git add -A data): lock.json and the .enc files under data/projects/.');
+  if (added.length) {
+    console.log('\nSo Git can merge teammates’ entries, add the password(s) to .env.local (never commit it), e.g.:');
+    for (const id of added) console.log(`  ${envName(nameOf(id))}=<the password of "${nameOf(id)}">`);
+    console.log('Give each project’s password only to the people who should see that project.');
+  }
+  if (legacy) {
+    console.log('\nThe old team password still opens every commit made before this one: share only the new project');
+    console.log('passwords from now on, and remove LOGBOOK_PASSWORD from .env.local if it is no longer a project password.');
+  }
 }
 
-async function rekey() {
-  const oldKey = await dataKey();
-  const newPassword = readPassword('LOGBOOK_NEW_PASSWORD');
-  if (!newPassword) throw new Error('Put LOGBOOK_NEW_PASSWORD=<new password> in .env.local (next to the current LOGBOOK_PASSWORD).');
+async function changePassword() {
+  const lock = readCurrentLock();
+  const opened = await unlockProjects(lock, await ask('Current password of the project: ', true));
+  if (!opened.size) throw new Error('That password does not open any project.');
 
-  // Decrypt everything first, so a wrong file stops us before anything is rewritten.
-  const json = combine([await readWorkspaceFile(dataDir, oldKey)]);
-  const files = await Promise.all(assets(true).map(async (f) => ({ f, bytes: await decryptBytes(oldKey, new Uint8Array(fs.readFileSync(f))) })));
+  const projects: { id: string; key: CryptoKey; ws: Workspace | null; name: string }[] = [];
+  for (const [id, key] of opened) {
+    const json = await readProjectFile(dataDir, id, key);
+    const ws = json ? parseLogbookText(json) : null;
+    projects.push({ id, key, ws, name: ws?.projects.find((p) => p.id === id)?.name ?? `project ${id}` });
+  }
+  let chosen = projects[0];
+  if (projects.length > 1) {
+    projects.forEach((p, i) => console.log(`  ${i + 1}. ${p.name}`));
+    const n = Number(await ask(`This password opens ${projects.length} projects. Which one gets a new password? (1-${projects.length}) `));
+    chosen = projects[n - 1];
+    if (!chosen) throw new Error('No such project.');
+  }
 
-  const { info, key } = await createLock(newPassword);
-  if (json) await writeWorkspaceFile(json, dataDir, key);
-  for (const { f, bytes } of files) fs.writeFileSync(f, await encryptBytes(key, bytes));
-  writeLock(info);
-  console.log(`Re-encrypted the log book and ${files.length} attachment(s) with the new password.`);
-  console.log('Now: set LOGBOOK_PASSWORD to the new password in .env.local (and remove LOGBOOK_NEW_PASSWORD),');
-  console.log('commit data/, and tell the team. Everyone signs in again with the new password.');
+  // Decrypt everything first, so a damaged file stops us before anything is rewritten.
+  const assetDir = path.join(projectsDir, chosen.id, 'assets');
+  const assets = await Promise.all(
+    files(assetDir, true).map(async (f) => ({ f, bytes: await decryptBytes(chosen.key, new Uint8Array(fs.readFileSync(f))) })),
+  );
+  const others: LockInfo = { ...lock, projects: Object.fromEntries(Object.entries(lock.projects).filter(([id]) => id !== chosen.id)) };
+  const password = await askUniquePassword(others, chosen.name);
+
+  // A new data key too, so someone who kept the old key (not just the password) is locked out.
+  const { info, key } = await setProjectPassword(lock, chosen.id, password);
+  if (chosen.ws) await writeProjectFile(dataDir, chosen.id, key, chosen.ws);
+  for (const { f, bytes } of assets) fs.writeFileSync(f, await encryptBytes(key, bytes));
+  fs.writeFileSync(path.join(dataDir, LOCK_FILE), JSON.stringify(info, null, 2) + '\n');
+  console.log(`Re-encrypted "${chosen.name}" and ${assets.length} screenshot(s) with the new password.`);
+  console.log(`Now: update ${envName(chosen.name)} (or whichever line held the old password) in .env.local,`);
+  console.log('commit data/, and give the new password to the people on this project. Everyone signs in to it again.');
+  console.log('Commits made before this one can still be opened with the old password.');
 }
 
 async function decrypt() {
-  const key = await dataKey();
-  const json = combine([await readWorkspaceFile(dataDir, key)]);
-  if (json) await writeWorkspaceFile(json, dataDir);
-  for (const file of assets(true)) {
-    fs.writeFileSync(file.slice(0, -ENC_SUFFIX.length), await decryptBytes(key, new Uint8Array(fs.readFileSync(file))));
-    fs.rmSync(file);
+  const lock = readCurrentLock();
+  const keys = await knownProjectKeys(lock);
+  for (const id of Object.keys(lock.projects)) {
+    if (keys.has(id)) continue;
+    const password = await ask(`Password for project ${id}: `, true);
+    const opened = await unlockProjects(lock, password);
+    if (!opened.has(id)) throw new Error('That password does not open this project.');
+    for (const [i, k] of opened) keys.set(i, k);
   }
-  fs.rmSync(path.join(dataDir, SEALED_WORKSPACE_FILE), { force: true });
+
+  const parts: Workspace[] = [];
+  const plain = readWorkspaceFile();
+  if (plain?.trim()) parts.push(parseLogbookText(plain));
+  const assets: { out: string; bytes: Uint8Array<ArrayBuffer> }[] = [];
+  for (const [id, key] of keys) {
+    const json = await readProjectFile(dataDir, id, key);
+    if (json) parts.push(parseLogbookText(json));
+    for (const f of files(path.join(projectsDir, id, 'assets'), true)) {
+      assets.push({ out: path.join(assetsDir, path.basename(f, ENC_SUFFIX)), bytes: await decryptBytes(key, new Uint8Array(fs.readFileSync(f))) });
+    }
+  }
+
+  writeWorkspaceFile(serializeWorkspace(merged(parts)));
+  fs.mkdirSync(assetsDir, { recursive: true });
+  for (const a of assets) fs.writeFileSync(a.out, a.bytes);
+  fs.rmSync(projectsDir, { recursive: true, force: true });
   fs.rmSync(path.join(dataDir, LOCK_FILE));
   console.log('The log book is plain JSON again (data/logbook.json). Anyone who can see the repo can read it.');
 }
 
 const args = process.argv.slice(2);
 try {
-  await (args.includes('--rekey') ? rekey() : args.includes('--decrypt') ? decrypt() : encrypt());
+  if (args.includes('--rekey')) throw new Error('--rekey is now --password: every project has its own password.');
+  await (args.includes('--password') ? changePassword() : args.includes('--decrypt') ? decrypt() : encrypt());
 } catch (e) {
   console.error((e as Error).message);
-  process.exit(1);
+  process.exitCode = 1;
+} finally {
+  closePrompt();
 }
+
+// LOGBOOK_NEW_PASSWORD belonged to the old --rekey; mention it so it doesn't linger in .env.local.
+if (readPassword('LOGBOOK_NEW_PASSWORD')) console.log('\n(LOGBOOK_NEW_PASSWORD in .env.local is no longer used; you can delete it.)');

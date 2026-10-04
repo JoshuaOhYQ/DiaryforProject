@@ -212,7 +212,14 @@ export function normalizeWorkspace(input: unknown): Workspace {
   ws.tombstones = Array.isArray(raw.tombstones)
     ? (raw.tombstones as Raw[])
         .filter((t) => t && typeof t.id === 'string' && COLLECTIONS.includes(t.collection as CollectionName))
-        .map((t): Tombstone => ({ id: str(t.id), collection: t.collection as CollectionName, deletedAt: stamp(t.deletedAt) }))
+        .map(
+          (t): Tombstone => ({
+            id: str(t.id),
+            collection: t.collection as CollectionName,
+            deletedAt: stamp(t.deletedAt),
+            ...(typeof t.projectId === 'string' && t.projectId ? { projectId: t.projectId } : {}),
+          }),
+        )
     : [];
   return sortWorkspace(ws);
 }
@@ -256,5 +263,36 @@ export function extractProject(ws: Workspace, projectId: string): Workspace {
     if (c === 'projects') continue;
     (out[c] as { projectId: string }[]) = (ws[c] as { projectId: string }[]).filter((r) => r.projectId === projectId);
   }
+  return out;
+}
+
+/** Every project id a workspace mentions (projects, records and deletions). */
+export function projectIdsIn(ws: Workspace): Set<string> {
+  const ids = new Set(ws.projects.map((p) => p.id));
+  for (const c of COLLECTIONS) {
+    if (c !== 'projects') for (const r of ws[c] as { projectId: string }[]) ids.add(r.projectId);
+  }
+  for (const t of ws.tombstones) if (t.projectId) ids.add(t.projectId);
+  ids.delete('');
+  return ids;
+}
+
+/**
+ * What goes in one project's encrypted file: like extractProject, plus its deletions. Deletions
+ * saved before tombstones recorded their project are kept in every project's file.
+ */
+export function projectSlice(ws: Workspace, projectId: string): Workspace {
+  return { ...extractProject(ws, projectId), tombstones: ws.tombstones.filter((t) => !t.projectId || t.projectId === projectId) };
+}
+
+/** Only the given projects (and deletions not tied to a project). */
+export function restrictWorkspace(ws: Workspace, projectIds: ReadonlySet<string>): Workspace {
+  const out = emptyWorkspace();
+  out.projects = ws.projects.filter((p) => projectIds.has(p.id));
+  for (const c of COLLECTIONS) {
+    if (c === 'projects') continue;
+    (out[c] as { projectId: string }[]) = (ws[c] as { projectId: string }[]).filter((r) => projectIds.has(r.projectId));
+  }
+  out.tombstones = ws.tombstones.filter((t) => !t.projectId || projectIds.has(t.projectId));
   return out;
 }

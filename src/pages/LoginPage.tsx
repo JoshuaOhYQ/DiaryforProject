@@ -1,34 +1,28 @@
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
-import { Eye, EyeOff, LockKeyhole, NotebookPen } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { LockKeyhole, NotebookPen } from 'lucide-react';
 import { startSession } from '../app/auth.ts';
-import { unlock, type LockInfo } from '../lib/lock.ts';
+import { PasswordField } from '../components/PasswordField.tsx';
+import { unlockProjects, type LockInfo } from '../lib/lock.ts';
 
-/** Shown before anything else on a password-protected site. */
+/** Shown before anything else on a password-protected log book. Each project has its own password. */
 export function LoginPage({ lock, onUnlocked }: { lock: LockInfo; onUnlocked: () => void }) {
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Shows the password only while the eye button is held down (mouse, touch, or Space/Enter).
-  const [peek, setPeek] = useState(false);
-  const holdKey = (e: KeyboardEvent, down: boolean) => {
-    if (e.key !== ' ' && e.key !== 'Enter') return;
-    e.preventDefault();
-    setPeek(down);
-  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!password || busy) return;
     setBusy(true);
     setError(null);
-    const key = await unlock(lock, password).catch(() => null);
-    if (!key) {
+    const keys = await unlockProjects(lock, password).catch(() => null);
+    if (!keys?.size) {
       setBusy(false);
       setError('Wrong password.');
       return;
     }
-    await startSession(key, remember);
+    await startSession(keys, remember);
     onUnlocked();
   };
 
@@ -42,53 +36,19 @@ export function LoginPage({ lock, onUnlocked }: { lock: LockInfo; onUnlocked: ()
           <div>
             <h1 style={{ margin: 0 }}>Project log book</h1>
             <p className="muted" style={{ margin: 0 }}>
-              Admin sign-in
+              Sign in with your project’s password
             </p>
           </div>
         </div>
-        <div className="field">
-          <label htmlFor="login-password">Password</label>
-          <div className="password-field">
-            <input
-              id="login-password"
-              type={peek ? 'text' : 'password'}
-              autoComplete="current-password"
-              autoCapitalize="off"
-              spellCheck={false}
-              autoFocus
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={!!error}
-              aria-describedby={error ? 'login-error' : undefined}
-            />
-            <button
-              type="button"
-              className="peek"
-              aria-label="Hold to show password"
-              aria-pressed={peek}
-              title="Hold to show password"
-              // Keep focus in the field so typing can continue after peeking.
-              onPointerDown={(e) => {
-                e.preventDefault();
-                setPeek(true);
-              }}
-              onPointerUp={() => setPeek(false)}
-              onPointerLeave={() => setPeek(false)}
-              onPointerCancel={() => setPeek(false)}
-              onKeyDown={(e) => holdKey(e, true)}
-              onKeyUp={(e) => holdKey(e, false)}
-              onBlur={() => setPeek(false)}
-              onContextMenu={(e) => e.preventDefault()}
-            >
-              {peek ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-          </div>
-          {error && (
-            <span id="login-error" className="login-error" role="alert">
-              {error}
-            </span>
-          )}
-        </div>
+        <PasswordField
+          id="login-password"
+          label="Project password"
+          value={password}
+          onChange={setPassword}
+          autoComplete="current-password"
+          autoFocus
+          error={error}
+        />
         <label className="row small">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
           Keep me signed in on this device
@@ -97,6 +57,21 @@ export function LoginPage({ lock, onUnlocked }: { lock: LockInfo; onUnlocked: ()
           <LockKeyhole size={16} /> {busy ? 'Checking…' : 'Sign in'}
         </button>
       </form>
+    </div>
+  );
+}
+
+/** Shown instead of the login page when data/lock.json still uses the old single password. */
+export function OutdatedLockPage() {
+  return (
+    <div className="login">
+      <div className="card card-pad stack">
+        <h1 style={{ margin: 0 }}>Project log book</h1>
+        <p>
+          This log book is still locked with one password for everything. Run <code>npm run lock</code> in the repo to give each project its own
+          password, then commit <code>data/</code>.
+        </p>
+      </div>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, Download, FileUp, Plus, Trash2 } from 'lucide-react';
 import type { Project } from '../types.ts';
 import { useAppActions, useProject } from '../app/context.ts';
+import { isLockedSite } from '../app/auth.ts';
 import { deleteProject } from '../app/projects.ts';
 import { toast } from '../app/toast.tsx';
 import { DEFAULT_ENTRY_TYPES, store, useWorkspace } from '../data/index.ts';
@@ -94,6 +95,12 @@ export function SettingsPage() {
                 </div>
               );
             })}
+            {isLockedSite() && (
+              <p className="small muted" style={{ marginTop: '0.75rem' }}>
+                Each project has its own password and only the projects you signed in to are listed. Use the project picker → <em>Open another project</em> to
+                add one. To change a project’s password, run <code>npm run lock -- --password</code> in the repo.
+              </p>
+            )}
           </section>
         </div>
       </div>

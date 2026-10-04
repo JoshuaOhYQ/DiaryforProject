@@ -1,4 +1,5 @@
 import { Download, FolderOpen, GitMerge, RotateCcw, Unplug } from 'lucide-react';
+import { isLockedSite } from '../app/auth.ts';
 import { toast } from '../app/toast.tsx';
 import { extractProject, parseLogbookText, store, useSaveStatus } from '../data/index.ts';
 import { downloadText, pickFile, safeFileName } from '../lib/files.ts';
@@ -9,7 +10,12 @@ async function readBackup() {
   const file = await pickFile('.json,application/json');
   if (!file) return null;
   try {
-    return parseLogbookText(await file.text());
+    const backup = parseLogbookText(await file.text());
+    const skipped = store.outOfScope(backup);
+    if (skipped.length) {
+      toast(`Skipped ${skipped.map((p) => `“${p.name}”`).join(', ')}: open that project with its password first (or add it with npm run lock).`);
+    }
+    return backup;
   } catch (e) {
     toast((e as Error).message);
     return null;
@@ -64,7 +70,16 @@ export function SaveTargetPanel() {
       {status.target === 'dev-server' && (
         <div className="notice">
           <span>
-            Every change is written to <code>{status.targetLabel}</code> (and screenshots to <code>data/assets/</code>) in this repo. Commit and push those files to share them with the team.
+            {isLockedSite() ? (
+              <>
+                Every change is encrypted with its project’s key and written to <code>{status.targetLabel}/</code> in this repo, screenshots included.
+              </>
+            ) : (
+              <>
+                Every change is written to <code>{status.targetLabel}</code> (and screenshots to <code>data/assets/</code>) in this repo.
+              </>
+            )}{' '}
+            Commit and push those files to share them with the team.
           </span>
         </div>
       )}

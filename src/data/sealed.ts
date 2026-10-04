@@ -1,11 +1,12 @@
 /**
  * The encrypted form of data/ that is committed to Git when the log book is locked
- * (data/lock.json exists, see src/lib/lock.ts):
+ * (data/lock.json exists, see src/lib/lock.ts). Each project is encrypted with its own key:
  *
- *   data/lock.json            salt and a password check (safe to publish)
- *   data/logbook.json.enc     one line of base64; a text line so a Git conflict still has
- *                             readable <<<<<<< ======= >>>>>>> markers around each side
- *   data/assets/<file>.enc    encrypted bytes
+ *   data/lock.json                              salt and each project's wrapped key (safe to publish)
+ *   data/projects/<projectId>/logbook.json.enc  that project's records, as one line of base64; a text
+ *                                               line so a Git conflict still has readable
+ *                                               <<<<<<< ======= >>>>>>> markers around each side
+ *   data/projects/<projectId>/assets/<file>.enc that project's screenshots, encrypted bytes
  *
  * Used by the app, the dev server, the Git merge driver and the scripts.
  */
@@ -14,6 +15,12 @@ import { splitConflictMarkers } from './merge.ts';
 
 export const WORKSPACE_FILE = 'logbook.json';
 export const SEALED_WORKSPACE_FILE = WORKSPACE_FILE + ENC_SUFFIX;
+export const PROJECTS_DIR = 'projects';
+
+/** Path inside data/ of a project's encrypted log book. */
+export const projectWorkspacePath = (projectId: string) => `${PROJECTS_DIR}/${projectId}/${SEALED_WORKSPACE_FILE}`;
+/** Path inside data/ of a project's encrypted attachment; `file` is the AttachmentRef path ("assets/x.png"). */
+export const projectAssetPath = (projectId: string, file: string) => `${PROJECTS_DIR}/${projectId}/${file}${ENC_SUFFIX}`;
 
 const CONFLICT_START = /^<{7}(\s|$)/m;
 const SEALED_LINE = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -28,7 +35,7 @@ export async function sealWorkspaceText(key: CryptoKey, json: string): Promise<s
 }
 
 /**
- * Decrypt logbook.json.enc. If Git left conflict markers in it, both sides are decrypted and
+ * Decrypt a project's logbook.json.enc. If Git left conflict markers in it, both sides are decrypted and
  * returned between plain-text markers, which parseLogbookText() merges. Throws if the key is wrong.
  */
 export async function openWorkspaceText(key: CryptoKey, sealed: string): Promise<string> {
@@ -37,7 +44,7 @@ export async function openWorkspaceText(key: CryptoKey, sealed: string): Promise
     try {
       return new TextDecoder().decode(await decryptBytes(key, fromBase64(line.trim())));
     } catch {
-      throw new Error(`Could not decrypt ${SEALED_WORKSPACE_FILE}. The password may have changed: log out and sign in again.`);
+      throw new Error(`Could not decrypt ${SEALED_WORKSPACE_FILE}. The project's password may have changed: log out and sign in again.`);
     }
   };
   if (!CONFLICT_START.test(sealed)) return open(sealed);

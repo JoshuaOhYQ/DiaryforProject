@@ -108,6 +108,8 @@ export interface Tombstone {
   id: string;
   collection: CollectionName;
   deletedAt: Timestamp;
+  /** The project the deleted record belonged to, so the deletion is saved in that project's file. */
+  projectId?: string;
 }
 
 export interface Workspace {

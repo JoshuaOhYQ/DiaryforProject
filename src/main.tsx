@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './app/App.tsx';
 import { loadLock, restoreSession } from './app/auth.ts';
 import { store } from './data/index.ts';
-import { LoginPage } from './pages/LoginPage.tsx';
+import { LoginPage, OutdatedLockPage } from './pages/LoginPage.tsx';
 import './styles.css';
 
 const root = createRoot(document.getElementById('root')!);
@@ -14,9 +14,10 @@ function start() {
   render(<App />);
 }
 
-// A site built with LOGBOOK_PASSWORD asks for it before loading any data.
+// A locked log book asks for a project password before loading any data.
 void (async () => {
   const lock = await loadLock();
-  if (lock && !(await restoreSession(lock))) render(<LoginPage lock={lock} onUnlocked={start} />);
+  if (lock === 'outdated') render(<OutdatedLockPage />);
+  else if (lock && !(await restoreSession(lock))) render(<LoginPage lock={lock} onUnlocked={start} />);
   else start();
 })();

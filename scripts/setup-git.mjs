@@ -1,5 +1,5 @@
 // Runs on `npm install`. Registers the log book merge driver used by .gitattributes,
-// so data/logbook.json (or the encrypted logbook.json.enc) is merged entry by entry instead of producing conflicts.
+// so data/logbook.json (or each project's encrypted logbook.json.enc) is merged entry by entry instead of producing conflicts.
 // Safe to run more than once; does nothing outside a Git checkout (e.g. on Vercel).
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';

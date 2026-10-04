@@ -10,12 +10,13 @@
  * To move to a shared backend later (Supabase, Firebase…), replace this module's saving and
  * loading with calls to that backend and keep the same public methods.
  */
-import type { AttachmentRef, CollectionName, RecordOf, Workspace } from '../types.ts';
+import type { AttachmentRef, CollectionName, Project, RecordOf, Workspace } from '../types.ts';
+import type { LockInfo } from '../lib/lock.ts';
 import { newId, nowStamp } from '../lib/id.ts';
 import { applyChanges, type Changes } from './changes.ts';
 import type { LocalDb } from './localDb.ts';
 import { mergeWorkspaces, parseLogbookText, sameWorkspace } from './merge.ts';
-import { COLLECTIONS, emptyWorkspace, serializeWorkspace, sortWorkspace } from './workspace.ts';
+import { COLLECTIONS, emptyWorkspace, restrictWorkspace, serializeWorkspace, sortWorkspace } from './workspace.ts';
 import {
   detectDevServer,
   folderPermission,
@@ -49,6 +50,8 @@ export interface StoreOptions {
   snapshot?: FileTarget | null;
   debounceMs?: number;
   channelName?: string | null;
+  /** The projects this session may see (locked log book), or null for all. */
+  scope?: () => ReadonlySet<string> | null;
 }
 
 const FOLDER_KEY = 'folderHandle';
@@ -92,6 +95,18 @@ export class LogbookStore {
   getState = (): Workspace => this.ws;
   getStatus = (): SaveStatus => this.status;
 
+  /** Drop projects this session has no key for (data from another sign-in, a backup, another tab). */
+  private visible(ws: Workspace): Workspace {
+    const scope = this.opts.scope?.();
+    return scope ? restrictWorkspace(ws, scope) : ws;
+  }
+
+  /** Projects in `ws` that this session cannot save (no password for them here). */
+  outOfScope(ws: Workspace): Project[] {
+    const scope = this.opts.scope?.();
+    return scope ? ws.projects.filter((p) => !scope.has(p.id)) : [];
+  }
+
   private emit() {
     for (const fn of this.listeners) fn();
   }
@@ -105,7 +120,7 @@ export class LogbookStore {
 
   async init(): Promise<void> {
     const { db } = this.opts;
-    let ws = (await db.loadWorkspace()) ?? emptyWorkspace();
+    let ws = this.visible((await db.loadWorkspace()) ?? emptyWorkspace());
 
     this.target = await (this.opts.detectTarget ?? (() => this.detectTarget()))();
     const sources = [this.target];
@@ -152,7 +167,7 @@ export class LogbookStore {
     this.channel.onmessage = async () => {
       const other = await this.opts.db.loadWorkspace();
       if (!other) return;
-      const merged = mergeWorkspaces(this.ws, other);
+      const merged = mergeWorkspaces(this.ws, this.visible(other));
       if (!sameWorkspace(merged, this.ws)) {
         this.ws = merged;
         this.emit();
@@ -179,7 +194,7 @@ export class LogbookStore {
 
   /** Bring in another copy of the log book (e.g. a teammate's backup) without losing anything. */
   mergeIn(other: Workspace): void {
-    this.ws = mergeWorkspaces(this.ws, other);
+    this.ws = mergeWorkspaces(this.ws, this.visible(other));
     this.emit();
     this.schedule();
   }
@@ -189,6 +204,7 @@ export class LogbookStore {
    * everything else is marked deleted, so the restore also wins when merged with teammates' copies.
    */
   restore(backup: Workspace): void {
+    backup = this.visible(backup);
     const now = nowStamp();
     const keep = new Set<string>();
     const restored = sortWorkspace({ ...backup });
@@ -199,7 +215,9 @@ export class LogbookStore {
       });
     }
     const dropped = COLLECTIONS.flatMap((c) =>
-      this.ws[c].filter((r) => !keep.has(r.id)).map((r) => ({ id: r.id, collection: c, deletedAt: now })),
+      this.ws[c]
+        .filter((r) => !keep.has(r.id))
+        .map((r) => ({ id: r.id, collection: c, deletedAt: now, projectId: 'projectId' in r ? r.projectId : r.id })),
     );
     restored.tombstones = [...backup.tombstones.filter((t) => !keep.has(t.id)), ...dropped];
     this.ws = sortWorkspace(restored);
@@ -254,7 +272,7 @@ export class LogbookStore {
           }
         }
       }
-      merged = await this.opts.db.mergeAndSave(merged);
+      merged = this.visible(await this.opts.db.mergeAndSave(merged));
       const patch: Partial<SaveStatus> = { lastLocalSave: Date.now(), error: null };
 
       if (target?.writable) {
@@ -295,7 +313,7 @@ export class LogbookStore {
         if (written.has(a.id)) continue;
         const blob = await db.getBlob(a.id);
         if (!blob) continue; // a teammate's file we never downloaded: it is already in their commit
-        await target.writeAsset(a.file, blob);
+        await target.writeAsset(a.file, blob, entry.projectId);
         written.add(a.id);
         changed = true;
       }
@@ -336,9 +354,10 @@ export class LogbookStore {
     const local = await db.getBlob(ref.id);
     if (local) return local;
     const snapshot = this.opts.snapshot === undefined ? staticTarget() : this.opts.snapshot;
+    const projectId = this.ws.entries.find((e) => e.attachments.some((a) => a.id === ref.id))?.projectId ?? '';
     for (const src of [this.target, snapshot]) {
       if (!src) continue;
-      const blob = await src.readAsset(ref.file).catch(() => null);
+      const blob = await src.readAsset(ref.file, projectId).catch(() => null);
       if (!blob) continue;
       await db.putBlob(ref.id, blob);
       if (this.target?.writable) {
@@ -351,6 +370,24 @@ export class LogbookStore {
       return blob;
     }
     return null;
+  }
+
+  // ---- locked log book -----------------------------------------------------
+
+  /** Change data/lock.json (e.g. add a new project's password). Needs a writable target. */
+  async updateLock(change: (info: LockInfo) => Promise<LockInfo>): Promise<void> {
+    const target = this.target;
+    if (!target?.writable) throw new Error('Run `npm run dev` or connect the data folder first, so the new password can be saved.');
+    // Read it fresh: a git pull may have added another project's password since sign-in.
+    const info = await target.readLock();
+    if (!info) throw new Error('data/lock.json is missing or out of date. Run `npm run lock` in the repo.');
+    await target.writeLock(await change(info));
+  }
+
+  /** Save what is pending, then remove the log book from this browser (used when logging out). */
+  async clearLocalCopy(): Promise<void> {
+    await this.flush().catch(() => undefined);
+    await this.opts.db.clearWorkspace();
   }
 
   // ---- folder connection (deployed site in Chrome/Edge) --------------------

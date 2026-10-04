@@ -26,9 +26,19 @@ export function applyChanges(ws: Workspace, changes: Changes, now: string): Work
   }
   if (dels.length) {
     const deleted = new Set(dels.map((d) => d.id));
-    next.tombstones = [...ws.tombstones.filter((t) => !deleted.has(t.id)), ...dels.map((d) => ({ id: d.id, collection: d.collection, deletedAt: now }))];
+    const tombstones = dels.map((d) => {
+      const projectId = projectOf(ws, d.collection, d.id);
+      return { id: d.id, collection: d.collection, deletedAt: now, ...(projectId ? { projectId } : {}) };
+    });
+    next.tombstones = [...ws.tombstones.filter((t) => !deleted.has(t.id)), ...tombstones];
   }
   return sortWorkspace(next);
+}
+
+/** The project a record belongs to (a project belongs to itself). */
+export function projectOf(ws: Workspace, collection: CollectionName, id: string): string | undefined {
+  if (collection === 'projects') return id;
+  return (ws[collection] as { id: string; projectId: string }[]).find((r) => r.id === id)?.projectId || undefined;
 }
 
 /** Merge two change sets (later ones win for the same record). */

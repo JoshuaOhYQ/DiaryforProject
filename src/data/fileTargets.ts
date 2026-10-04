@@ -5,11 +5,15 @@
  *  - folder      deployed site in Chrome/Edge: you pick the repo's data/ folder once and the app writes there.
  *  - static      deployed site, read-only: shows the log book that was committed when the site was built.
  *
- * When the log book is locked (see src/data/sealed.ts) the same targets read and write the
- * encrypted files instead, using the key from the login page. Nothing leaves the browser unencrypted.
+ * When the log book is locked (see src/data/sealed.ts) the same targets read and write each
+ * project's encrypted files instead, using the keys from the login page. Only the projects this
+ * session has keys for are read or written. Nothing leaves the browser unencrypted.
  */
-import { decryptBytes, ENC_SUFFIX, encryptBytes } from '../lib/lock.ts';
-import { mimeForAsset, openWorkspaceText, SEALED_WORKSPACE_FILE, sealWorkspaceText, WORKSPACE_FILE } from './sealed.ts';
+import type { Workspace } from '../types.ts';
+import { decryptBytes, encryptBytes, isLockInfo, LOCK_FILE, type LockInfo, type ProjectKeys } from '../lib/lock.ts';
+import { mergeWorkspaces, parseLogbookText } from './merge.ts';
+import { mimeForAsset, openWorkspaceText, projectAssetPath, projectWorkspacePath, sealWorkspaceText, WORKSPACE_FILE } from './sealed.ts';
+import { parseWorkspace, projectIdsIn, projectSlice, restrictWorkspace, serializeWorkspace } from './workspace.ts';
 
 export type TargetKind = 'dev-server' | 'folder' | 'static';
 
@@ -20,8 +24,12 @@ export interface FileTarget {
   writable: boolean;
   readWorkspace(): Promise<string | null>;
   writeWorkspace(text: string): Promise<void>;
-  readAsset(file: string): Promise<Blob | null>;
-  writeAsset(file: string, blob: Blob): Promise<void>;
+  /** `file` is the AttachmentRef path ("assets/x.png"); `projectId` is the project of the entry it is attached to. */
+  readAsset(file: string, projectId: string): Promise<Blob | null>;
+  writeAsset(file: string, blob: Blob, projectId: string): Promise<void>;
+  /** data/lock.json, or null when the log book is not locked. */
+  readLock(): Promise<LockInfo | null>;
+  writeLock(info: LockInfo): Promise<void>;
 }
 
 const base = () => import.meta.env.BASE_URL ?? '/';
@@ -36,45 +44,98 @@ async function fetchOrNull(url: string): Promise<Response | null> {
   }
 }
 
-/** Set by the login page when the log book is locked. */
-let dataKey: CryptoKey | null = null;
-export function setDataKey(key: CryptoKey | null) {
-  dataKey = key;
+/** Set by the login page when the log book is locked: the data key of each project this session can open. */
+let dataKeys: ProjectKeys | null = null;
+export function setDataKeys(keys: ProjectKeys | null) {
+  dataKeys = keys;
+}
+export const getDataKeys = (): ProjectKeys | null => dataKeys;
+
+/** Ids of the projects this session can open, or null when the log book is not locked. */
+export function dataScope(): ReadonlySet<string> | null {
+  return dataKeys ? new Set(dataKeys.keys()) : null;
 }
 
-const workspaceFile = () => (dataKey ? SEALED_WORKSPACE_FILE : WORKSPACE_FILE);
-
 /** Plain file access inside data/ (paths like "logbook.json" or "assets/x.png"). */
-interface RawFiles {
+export interface RawFiles {
   readText(file: string): Promise<string | null>;
   readBlob(file: string): Promise<Blob | null>;
   writeText(file: string, text: string): Promise<void>;
   writeBlob(file: string, blob: Blob): Promise<void>;
 }
 
-/** The workspace and asset methods of a target, encrypting when the log book is locked. */
-function codec(raw: RawFiles): Pick<FileTarget, 'readWorkspace' | 'writeWorkspace' | 'readAsset' | 'writeAsset'> {
+type Codec = Pick<FileTarget, 'readWorkspace' | 'writeWorkspace' | 'readAsset' | 'writeAsset' | 'readLock' | 'writeLock'>;
+
+/**
+ * The workspace and asset methods of a target. When the log book is locked, the workspace is
+ * split by project and each part is encrypted with that project's key. Exported for tests.
+ */
+export function codec(raw: RawFiles, keys: () => ProjectKeys | null = () => dataKeys): Codec {
   return {
     async readWorkspace() {
-      const text = await raw.readText(workspaceFile());
-      // Throws on a wrong key, so a save never overwrites a file it could not read.
-      return text !== null && dataKey ? openWorkspaceText(dataKey, text) : text;
+      const k = keys();
+      if (!k) return raw.readText(WORKSPACE_FILE);
+      let ws: Workspace | null = null;
+      for (const [id, key] of k) {
+        const text = await raw.readText(projectWorkspacePath(id));
+        if (text === null) continue;
+        // Throws on a wrong key, so a save never overwrites a file it could not read.
+        const part = restrictWorkspace(parseLogbookText(await openWorkspaceText(key, text)), new Set([id]));
+        ws = ws ? mergeWorkspaces(ws, part) : part;
+      }
+      return ws && serializeWorkspace(ws);
     },
     async writeWorkspace(text) {
-      await raw.writeText(workspaceFile(), dataKey ? await sealWorkspaceText(dataKey, text) : text);
+      const k = keys();
+      if (!k) return raw.writeText(WORKSPACE_FILE, text);
+      const ws = parseWorkspace(text);
+      const present = projectIdsIn(ws);
+      for (const [id, key] of k) {
+        if (!present.has(id)) continue;
+        const json = serializeWorkspace(projectSlice(ws, id));
+        const file = projectWorkspacePath(id);
+        const current = await raw.readText(file);
+        // Every write re-encrypts with a fresh IV, so leave unchanged projects alone to keep Git quiet.
+        if (current !== null && (await openWorkspaceText(key, current)) === json) continue;
+        await raw.writeText(file, await sealWorkspaceText(key, json));
+      }
     },
-    async readAsset(file) {
-      if (!dataKey) return raw.readBlob(file);
-      const blob = await raw.readBlob(file + ENC_SUFFIX);
-      if (!blob) return null;
-      return new Blob([await decryptBytes(dataKey, new Uint8Array(await blob.arrayBuffer()))], { type: mimeForAsset(file) });
+    async readAsset(file, projectId) {
+      const k = keys();
+      if (!k) return raw.readBlob(file);
+      const key = k.get(projectId);
+      const blob = key ? await raw.readBlob(projectAssetPath(projectId, file)) : null;
+      if (!key || !blob) return null;
+      return new Blob([await decryptBytes(key, new Uint8Array(await blob.arrayBuffer()))], { type: mimeForAsset(file) });
     },
-    async writeAsset(file, blob) {
-      if (!dataKey) return raw.writeBlob(file, blob);
-      await raw.writeBlob(file + ENC_SUFFIX, new Blob([await encryptBytes(dataKey, new Uint8Array(await blob.arrayBuffer()))]));
+    async writeAsset(file, blob, projectId) {
+      const k = keys();
+      if (!k) return raw.writeBlob(file, blob);
+      const key = k.get(projectId);
+      if (!key) return; // not one of this session's projects
+      const path = projectAssetPath(projectId, file);
+      // Attachments never change, so an existing file is already right (re-encrypting would only churn Git).
+      if (await raw.readBlob(path)) return;
+      await raw.writeBlob(path, new Blob([await encryptBytes(key, new Uint8Array(await blob.arrayBuffer()))]));
+    },
+    async readLock() {
+      const text = await raw.readText(LOCK_FILE);
+      if (!text) return null;
+      try {
+        const info: unknown = JSON.parse(text);
+        return isLockInfo(info) ? info : null;
+      } catch {
+        return null;
+      }
+    },
+    async writeLock(info) {
+      await raw.writeText(LOCK_FILE, JSON.stringify(info, null, 2) + '\n');
     },
   };
 }
+
+/** The label shown for a target writing into `dir`. */
+const targetLabel = (dir: string) => (dataKeys ? `${dir}/projects` : `${dir}/${WORKSPACE_FILE}`);
 
 function readOnly(): Pick<RawFiles, 'writeText' | 'writeBlob'> {
   return {
@@ -108,19 +169,20 @@ export async function detectDevServer(): Promise<FileTarget | null> {
   const info = (await res.json().catch(() => null)) as { ok?: boolean; dataDir?: string } | null;
   if (!info?.ok) return null;
   const dir = info.dataDir ?? 'data';
-  const put = async (path: string, body: BodyInit, file: string) => {
-    const res = await fetch(`${base()}__logbook/${path}`, { method: 'PUT', body });
-    if (!res.ok) throw new Error(`Could not write ${dir}/${file} (${res.status})`);
+  const put = async (file: string, body: BodyInit) => {
+    const res = await fetch(`${base()}__logbook/file/${file.split('/').map(encodeURIComponent).join('/')}`, { method: 'PUT', body });
+    if (res.ok) return;
+    const reason = await res
+      .json()
+      .then((j: { error?: string }) => j.error)
+      .catch(() => null);
+    throw new Error(`Could not write ${dir}/${file} (${reason ?? res.status})`);
   };
   return {
     kind: 'dev-server',
-    label: `${dir}/${workspaceFile()}`,
+    label: targetLabel(dir),
     writable: true,
-    ...codec({
-      ...fetchReads,
-      writeText: (file, text) => put(file === SEALED_WORKSPACE_FILE ? 'save-sealed' : 'save', text, file),
-      writeBlob: (file, blob) => put(`asset/${encodeURIComponent(file.replace(/^assets\//, ''))}`, blob, file),
-    }),
+    ...codec({ ...fetchReads, writeText: put, writeBlob: put }),
   };
 }
 
@@ -186,7 +248,7 @@ export function folderTarget(dir: FileSystemDirectoryHandle): FileTarget {
   };
   return {
     kind: 'folder',
-    label: `${dir.name}/${workspaceFile()}`,
+    label: targetLabel(dir.name),
     writable: true,
     ...codec({
       readText: async (file) => (await read(file))?.text() ?? null,

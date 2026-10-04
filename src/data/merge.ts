@@ -26,7 +26,10 @@ export function mergeWorkspaces(a: Workspace, b: Workspace): Workspace {
   const tombstones = new Map<string, Tombstone>();
   for (const t of [...a.tombstones, ...b.tombstones]) {
     const existing = tombstones.get(t.id);
-    if (!existing || t.deletedAt > existing.deletedAt) tombstones.set(t.id, t);
+    // On a tie keep the copy that knows its project, so the result doesn't depend on merge order.
+    if (!existing || t.deletedAt > existing.deletedAt || (t.deletedAt === existing.deletedAt && !existing.projectId && t.projectId)) {
+      tombstones.set(t.id, t);
+    }
   }
 
   const out = emptyWorkspace();

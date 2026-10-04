@@ -14,6 +14,8 @@ export interface LocalDb {
   mergeAndSave(ws: Workspace): Promise<Workspace>;
   /** Overwrite without merging (used by Restore). */
   replace(ws: Workspace): Promise<void>;
+  /** Forget the log book and attachments (settings such as a connected folder stay). */
+  clearWorkspace(): Promise<void>;
   getBlob(id: string): Promise<Blob | undefined>;
   putBlob(id: string, blob: Blob): Promise<void>;
   getKv<T>(key: string): Promise<T | undefined>;
@@ -46,6 +48,10 @@ export function openLocalDb(name = 'project-logbook'): LocalDb {
     },
     async replace(ws) {
       await (await db()).put(KV, ws, WORKSPACE_KEY);
+    },
+    async clearWorkspace() {
+      const tx = (await db()).transaction([KV, BLOBS], 'readwrite');
+      await Promise.all([tx.objectStore(KV).delete(WORKSPACE_KEY), tx.objectStore(BLOBS).clear(), tx.done]);
     },
     async getBlob(id) {
       return (await db()).get(BLOBS, id);

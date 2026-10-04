@@ -5,8 +5,9 @@
 # producing a JSON conflict. The driver is registered by `npm install`
 # (scripts/setup-git.mjs). Without it Git falls back to a normal text merge.
 data/logbook.json merge=logbook
-# The encrypted copy (see `npm run lock`): one base64 line, so diffs are meaningless.
-data/logbook.json.enc merge=logbook -diff
+# Each project's encrypted copy (see `npm run lock`): one base64 line, so diffs are meaningless.
+data/projects/*/logbook.json.enc merge=logbook -diff
 
 # Screenshots are binary.
 data/assets/** binary
+data/projects/*/assets/** binary

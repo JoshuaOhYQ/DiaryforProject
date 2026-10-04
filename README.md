@@ -24,7 +24,8 @@ can hold several projects, and new ones start from a template.
 
 Built with Vite + React + TypeScript. There is no server or account: data lives in your browser
 and in `data/logbook.json`, which you commit to Git like any other file. It can be committed
-**encrypted** (`npm run lock`), so the repo can be public while only the team can read the log book.
+**encrypted** (`npm run lock`) with **a separate password for each project**, so the repo can be
+public and giving someone one project's password shows them that project and nothing else.
 
 ---
 
@@ -40,14 +41,16 @@ and in `data/logbook.json`, which you commit to Git like any other file. It can 
    ```
 
 3. If the log book is encrypted (there is a `data/lock.json`), create a file called `.env.local`
-   in this folder containing the team password:
+   in this folder with the password of each project you work on, one line per project (the name
+   after `LOGBOOK_PASSWORD_` is up to you):
 
    ```text
-   LOGBOOK_PASSWORD=the team password
+   LOGBOOK_PASSWORD_PIPER=the PIPER password
+   LOGBOOK_PASSWORD_ROBOT_ARM=the robot arm password
    ```
 
    Git ignores `.env.local`, so it is never committed. It lets Git merge teammates' entries; the
-   app itself asks for the same password when it opens.
+   app itself asks for a project password when it opens.
 
 **If `node` or `npm` is "not recognized"** after installing Node, the terminal has an old PATH.
 First close all terminals (and VS Code) and open a new one. If that doesn't help, check that Node
@@ -76,8 +79,8 @@ That's it. While `npm run dev` is running, **every change is written to `data/lo
 | `npm test` | Run the tests (data layer, merging, Gantt date maths, log book builder, importer) |
 | `npm run build` | Build the static site into `dist/` (includes a copy of `data/`) |
 | `npm run seed -- --force` | Recreate `data/logbook.json` from the PIPER template and `docs/WORK_LOG_smart_home.md` |
-| `npm run lock` | Encrypt the log book in the repo with `LOGBOOK_PASSWORD` (see [Keeping the log book private](#keeping-the-log-book-private)) |
-| `npm run lock -- --rekey` | Change the password (`LOGBOOK_NEW_PASSWORD` = the new one) |
+| `npm run lock` | Encrypt the log book in the repo, asking for a password for each project (see [Keeping the log book private](#keeping-the-log-book-private)) |
+| `npm run lock -- --password` | Change one project's password |
 | `npm run lock -- --decrypt` | Turn encryption off again |
 
 ## Everyday use
@@ -152,9 +155,9 @@ doesn't say how long it took, so edit that entry and set them.
 The deployed site is a static copy: it shows the log book as it was when it was built, and
 each visitor's own changes stay in their browser unless they connect the data folder.
 
-The site asks for the team password before showing anything when the log book is encrypted
-(see below). Each person signs in once; *Keep me signed in* remembers it on that device, and the
-log-out button in the top bar forgets it.
+When the log book is encrypted (see below) the site asks for a project password before showing
+anything, and shows only the project(s) that password opens. *Keep me signed in* remembers it on
+that device; the log-out button in the top bar forgets it and removes the log book from the browser.
 
 - **GitHub Pages**: push to `main`, then in the repo go to *Settings → Pages → Source:
   GitHub Actions*. The workflow in `.github/workflows/deploy.yml` tests, builds and publishes on
@@ -165,32 +168,53 @@ log-out button in the top bar forgets it.
 ## Keeping the log book private
 
 With `npm run lock` the log book is stored **encrypted** in the repo, so the code can be public
-on GitHub while only people with the team password can read the entries:
+on GitHub. **Every project has its own password**: share a project's password and that person can
+open that project only. Nobody, you included, has one password for everything.
 
-- `data/lock.json` holds a random salt and a password check. It is not secret.
-- `data/logbook.json.enc` and `data/assets/*.enc` are the log book and screenshots, encrypted with
-  AES-256-GCM using a key derived from the password (PBKDF2, 600 000 rounds).
-- The app encrypts and decrypts in the browser, after you sign in, in `npm run dev`, on the
-  deployed site and with a connected folder alike. The dev server only ever stores encrypted data
-  and refuses plain files once the log book is locked.
-- The Git merge driver reads `LOGBOOK_PASSWORD` from `.env.local` to merge teammates' entries.
-  Without it, Git leaves a conflict; open the app, sign in, and it merges both sides for you.
+- `data/lock.json` holds a random salt and, for each project, its key locked with that project's
+  password. It is not secret.
+- `data/projects/<id>/logbook.json.enc` and `data/projects/<id>/assets/*.enc` are each project's
+  log book and screenshots, encrypted with that project's own key (AES-256-GCM; passwords are
+  stretched with PBKDF2, 600 000 rounds). The project ids in the folder names are random and say
+  nothing about the project.
+- **Signing in**: type a project password and the app opens that project. To work on another one,
+  use the project picker → *Open another project* and type its password; both stay open until you
+  log out. The app only downloads and decrypts the projects you have a password for.
+- **New projects**: *New project* asks for the new project's password (it must differ from the
+  others) and adds it to `data/lock.json`. This needs `npm run dev` or a connected data folder.
+- The app encrypts and decrypts in the browser, in `npm run dev`, on the deployed site and with a
+  connected folder alike. The dev server only ever stores encrypted data, refuses plain files once
+  the log book is locked, and never lets the app remove or change a project's password.
+- The Git merge driver uses the passwords in `.env.local` to merge teammates' entries. For a
+  project whose password isn't there, Git leaves a conflict; open the app, sign in to that project,
+  and it merges both sides for you.
 - The deployed site publishes the committed encrypted files as they are. The deploy refuses to
-  publish an unencrypted log book.
+  publish an unencrypted log book. (If the repo holds a plain `data/logbook.json`, the deploy can
+  encrypt it with the `LOGBOOK_PASSWORD` secret instead, but then that one password opens every
+  project. Run `npm run lock` to give each project its own.)
+
+Commands:
+
+- `npm run lock` encrypts whatever is not encrypted yet and asks (hidden typing) for a password for
+  each project that has none. It also upgrades a log book locked the old way, with one password for
+  everything, using `LOGBOOK_PASSWORD` from `.env.local`.
+- `npm run lock -- --password` changes one project's password: type the current one, then the new
+  one twice. The project gets a new key as well, so someone who saved the old key is locked out
+  too. Update `.env.local`, commit `data/` and give the new password to the people on that project.
+- `npm run lock -- --decrypt` turns encryption off (asks for any project password it doesn't know).
 
 Things to know:
 
-- **Use a long, random password.** The encrypted files are public, so anyone can try passwords
-  offline. Share it with the team privately, never in the repo or a public chat.
-- **If the password leaks, every old commit can be decrypted.** Changing it
-  (`npm run lock -- --rekey`) protects new commits only.
+- **Use long, random passwords.** The encrypted files are public, so anyone can try passwords
+  offline. Share each one privately, never in the repo or a public chat.
+- **Old commits keep their old protection.** Changing a password protects new commits only:
+  anyone who had the old password can still check out an older commit and read the project as it
+  was. If the log book was ever locked with one password for everything, that password still opens
+  every project in the commits made before the upgrade, so only share the new project passwords.
 - **Encrypting doesn't remove what was committed before.** Old commits keep any plain
   `data/logbook.json`; removing it means rewriting the Git history.
-- `git diff` can't show what changed in the log book; every save rewrites the whole line.
-- Changing the password: put the current one in `LOGBOOK_PASSWORD` and the new one in
-  `LOGBOOK_NEW_PASSWORD` in `.env.local`, run `npm run lock -- --rekey`, then set
-  `LOGBOOK_PASSWORD` to the new one, commit `data/` and tell the team. Everyone should pull
-  before saving again.
+- `git diff` can't show what changed in the log book; every save rewrites a project's whole line.
+- Anyone can see *how many* projects there are (one entry each in `lock.json`), but not their names.
 
 ## Backups
 
@@ -208,7 +232,7 @@ src/
     localDb.ts     IndexedDB in the browser
     fileTargets.ts where logbook.json lives: dev server, connected folder, or read-only site
     merge.ts       record-by-record merge (also used by the Git merge driver)
-    sealed.ts      the encrypted form of data/ (lock.json, *.enc); crypto itself is in lib/lock.ts
+    sealed.ts      the encrypted form of data/ (lock.json, projects/<id>/*.enc); crypto is in lib/lock.ts
     workspace.ts   the file format, defaults and validation
   gantt/         ganttMath.ts (dependencies, slippage), layout, SVG chart, task panel, export
   logbook/       buildWeek.ts (what goes on a page), narrative draft, Word export, print layout
@@ -216,7 +240,7 @@ src/
   templates/     project templates (PIPER, engineering, blank)
   pages/         Dashboard, Log, Gantt, Team, Log book, Settings
 vite-plugin-logbook.ts   dev-only endpoint that writes data/ to disk
-scripts/                 seed, lock (encryption), Git merge driver and its setup
+scripts/                 seed, lock (per-project encryption), Git merge driver and its setup
 data/logbook.json        the shared log book; data/assets/ holds screenshots
 ```
 
@@ -241,7 +265,12 @@ of the app never strips data a newer one added.
 - **A screenshot shows as a file icon** on a teammate's computer: they need to `git pull` (the image
   is in `data/assets/`).
 - **`npm` or `node` not found**: install Node.js (see Setup) and open a new terminal.
-- **"Could not decrypt data/logbook.json.enc"**: the password was changed. Log out (top bar) and
-  sign in with the new one, and update `.env.local`.
-- **`logbook merge driver: The log book is encrypted…`** during `git pull`: add `LOGBOOK_PASSWORD`
-  to `.env.local`. For this pull, open the app and sign in; it merges the conflict, then commit.
+- **"Could not decrypt logbook.json.enc"**: that project's password was changed. Log out (top bar)
+  and sign in with the new one, and update `.env.local`.
+- **A project is missing after signing in**: each password opens only its own project. Use the
+  project picker → *Open another project* and type that project's password.
+- **"This log book is still locked with one password for everything"**: run `npm run lock` once to
+  give each project its own password, then commit `data/`.
+- **`logbook merge driver: None of the passwords in .env.local opens this project`** during
+  `git pull`: add that project's password to `.env.local` as `LOGBOOK_PASSWORD_<NAME>=…`. For this
+  pull, open the app and sign in to the project; it merges the conflict, then commit.
