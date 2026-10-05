@@ -4,12 +4,16 @@
  * Every project has its own random data key, which encrypts that project's files (AES-256-GCM).
  * lock.json holds each data key wrapped (encrypted) with a key derived from that project's
  * password (PBKDF2), so a password opens only its own project. It also lists each project's name
- * (public, for the sign-in page) and a check for the admin password, which is needed to create
- * projects but opens none of them.
+ * (public, for the sign-in page) and a check for the admin password.
+ *
+ * The admin password creates projects and resets forgotten project passwords. For that, each
+ * project's data key is also wrapped with the admin password's key ("admin" below), which means the
+ * admin password can open every project that has this copy.
  *
  *   { "v": 2, "salt": "...", "iterations": 600000,
  *     "admin": { "check": "<proves the admin password>" },
- *     "projects": { "<projectId>": { "name": "PIPER", "key": "<wrapped data key>", "check": "<proves the data key>" } } }
+ *     "projects": { "<projectId>": { "name": "PIPER", "key": "<data key wrapped with the project password>",
+ *                                    "admin": "<data key wrapped with the admin password>", "check": "<proves the data key>" } } }
  *
  * Uses Web Crypto only, so the same code runs in the browser and in Node (the Vite plugin, scripts).
  */
@@ -18,6 +22,8 @@ export interface ProjectLock {
   name?: string;
   /** base64 of the project's data key, encrypted with its password key. */
   key: string;
+  /** base64 of the data key encrypted with the admin password's key, so the admin can reset the password. */
+  admin?: string;
   /** base64 of a known string encrypted with the data key, so a remembered key can be checked. */
   check: string;
 }
@@ -133,26 +139,58 @@ export function listProjects(info: LockInfo): { id: string; name: string }[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+async function wrapDataKey(wrapKey: CryptoKey, dataKey: CryptoKey): Promise<string> {
+  return toBase64(await encryptBytes(wrapKey, new Uint8Array(await subtle().exportKey('raw', dataKey))));
+}
+
+async function unwrapDataKey(wrapKey: CryptoKey, wrapped: string): Promise<CryptoKey> {
+  return importKey(toBase64(await decryptBytes(wrapKey, fromBase64(wrapped))));
+}
+
 /**
- * Give a project a password: returns the updated lock and the project's (new) data key.
- * Pass `password` as a string, or a key from passwordKey() to wrap several projects with one derivation.
+ * Give a project a password: returns the updated lock and the project's data key (a new one unless
+ * `dataKey` is passed). Pass `password` as a string, or a key from passwordKey() to wrap several
+ * projects with one derivation. With `adminKey`, the admin can later reset this password.
  */
 export async function setProjectPassword(
   info: LockInfo,
   projectId: string,
   password: string | CryptoKey,
-  { dataKey, name }: { dataKey?: CryptoKey; name?: string } = {},
+  { dataKey, name, adminKey }: { dataKey?: CryptoKey; name?: string; adminKey?: CryptoKey } = {},
 ): Promise<{ info: LockInfo; key: CryptoKey }> {
   const wrapKey = typeof password === 'string' ? await passwordKey(info, password) : password;
   const key = dataKey ?? (await newDataKey());
-  const raw = new Uint8Array(await subtle().exportKey('raw', key));
-  const label = name ?? info.projects[projectId]?.name;
+  const existing = info.projects[projectId];
+  // Same data key as before: keep its check (so remembered sign-ins still work) and the admin's copy.
+  const sameKey = !!dataKey && !!existing && (await checkProjectKey(info, projectId, key));
+  const label = name ?? existing?.name;
+  const admin = adminKey ? await wrapDataKey(adminKey, key) : sameKey ? existing.admin : undefined;
   const entry: ProjectLock = {
     ...(label ? { name: label } : {}),
-    key: toBase64(await encryptBytes(wrapKey, raw)),
-    check: toBase64(await encryptBytes(key, new TextEncoder().encode(checkText(projectId)))),
+    key: await wrapDataKey(wrapKey, key),
+    ...(admin ? { admin } : {}),
+    check: sameKey ? existing.check : toBase64(await encryptBytes(key, new TextEncoder().encode(checkText(projectId)))),
   };
   return { info: { ...info, projects: { ...info.projects, [projectId]: entry } }, key };
+}
+
+/** Let the admin reset this project's password later (stores the data key wrapped with the admin key). */
+export async function addAdminCopy(info: LockInfo, projectId: string, dataKey: CryptoKey, adminKey: CryptoKey): Promise<LockInfo> {
+  const entry = info.projects[projectId];
+  if (!entry) return info;
+  return { ...info, projects: { ...info.projects, [projectId]: { ...entry, admin: await wrapDataKey(adminKey, dataKey) } } };
+}
+
+/** The project's data key from the admin's copy, or null if the project has none (or the key is wrong). */
+export async function recoverProjectKey(info: LockInfo, projectId: string, adminKey: CryptoKey): Promise<CryptoKey | null> {
+  const wrapped = info.projects[projectId]?.admin;
+  if (!wrapped) return null;
+  try {
+    const key = await unwrapDataKey(adminKey, wrapped);
+    return (await checkProjectKey(info, projectId, key)) ? key : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Change the name shown on the sign-in page. */
@@ -173,10 +211,19 @@ export async function unlockProject(info: LockInfo, projectId: string, password:
   }
 }
 
-/** Set (or replace) the admin password, which is needed to create projects. */
-export async function setAdminPassword(info: LockInfo, password: string): Promise<LockInfo> {
+/**
+ * Set (or replace) the admin password. Pass the current admin key to move the admin's copies of the
+ * project keys over to the new password; without it they are dropped.
+ */
+export async function setAdminPassword(info: LockInfo, password: string, currentAdminKey?: CryptoKey): Promise<LockInfo> {
   const key = await passwordKey(info, password);
-  return { ...info, admin: { check: toBase64(await encryptBytes(key, new TextEncoder().encode(ADMIN_TEXT))) } };
+  const projects: Record<string, ProjectLock> = {};
+  for (const [id, entry] of Object.entries(info.projects)) {
+    const { admin: _old, ...rest } = entry;
+    const dataKey = currentAdminKey ? await recoverProjectKey(info, id, currentAdminKey) : null;
+    projects[id] = dataKey ? { ...rest, admin: await wrapDataKey(key, dataKey) } : rest;
+  }
+  return { ...info, projects, admin: { check: toBase64(await encryptBytes(key, new TextEncoder().encode(ADMIN_TEXT))) } };
 }
 
 /** The admin key for this password, or null if it is wrong (or no admin password is set). */

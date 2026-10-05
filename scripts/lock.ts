@@ -5,7 +5,8 @@
  *   npm run lock                  encrypt data/: asks for a password for each project that has none yet,
  *                                 and for an admin password (needed to create projects) if there is none;
  *                                 also upgrades the old one-password lock, using LOGBOOK_PASSWORD
- *   npm run lock -- --password    change one project's password (asks for the current one, then the new one)
+ *   npm run lock -- --password    change one project's password (asks for the current one, or the admin
+ *                                 password if it is forgotten, then the new one)
  *   npm run lock -- --admin       change the admin password
  *   npm run lock -- --decrypt     turn encryption off again (plain data/logbook.json, no lock.json)
  *
@@ -21,7 +22,11 @@ import {
   ENC_SUFFIX,
   encryptBytes,
   LOCK_FILE,
+  addAdminCopy,
+  listProjects,
   newLock,
+  passwordKey,
+  recoverProjectKey,
   setAdminPassword,
   setProjectName,
   setProjectPassword,
@@ -111,7 +116,7 @@ async function askAdminPassword(lock: LockInfo, fromEnv: boolean): Promise<strin
     console.log('Using LOGBOOK_ADMIN_PASSWORD from .env.local as the admin password.');
     return env;
   }
-  console.log('The admin password is needed to create projects. It does not open any project.');
+  console.log('The admin password creates projects and resets forgotten project passwords, so it can open every project. Keep it safe.');
   for (;;) {
     const password = await askNewPassword('the admin');
     if (!(await unlockProjects(lock, password)).size) return password;
@@ -119,15 +124,43 @@ async function askAdminPassword(lock: LockInfo, fromEnv: boolean): Promise<strin
   }
 }
 
+let adminKeyCache: CryptoKey | null = null;
+
+/** The admin key, from LOGBOOK_ADMIN_PASSWORD or typed in; null if skipped (Enter) or no admin password is set. */
+async function adminKeyFor(lock: LockInfo, why: string): Promise<CryptoKey | null> {
+  if (!lock.admin) return null;
+  if (adminKeyCache) return adminKeyCache;
+  const env = readPassword('LOGBOOK_ADMIN_PASSWORD');
+  adminKeyCache = env ? await unlockAdmin(lock, env) : null;
+  for (let i = 0; !adminKeyCache && i < 3; i++) {
+    const password = await ask(`Admin password, ${why} (Enter to skip): `, true).catch(() => '');
+    if (!password) return null;
+    adminKeyCache = await unlockAdmin(lock, password);
+    if (!adminKeyCache) console.log('  Wrong admin password.');
+  }
+  return adminKeyCache;
+}
+
 /**
- * Bring lock.json up to date: each project's name for the sign-in page (from `names`, or read from
- * the projects this computer can open) and an admin password if there is none yet.
+ * Bring lock.json up to date: an admin password if there is none yet, each project's name for the
+ * sign-in page (from `names`, or read from the projects this computer can open), and the admin's
+ * copy of each project's key so the admin can reset forgotten passwords.
  */
 async function finishLock(lock: LockInfo, keys: ProjectKeys, names: Map<string, string>): Promise<LockInfo> {
+  if (!lock.admin) {
+    const password = await askAdminPassword(lock, true);
+    lock = await setAdminPassword(lock, password);
+    adminKeyCache = await passwordKey(lock, password);
+    console.log('Admin password set.');
+  }
   const all = new Map([...(await knownProjectKeys(lock)), ...keys]);
   for (const id of Object.keys(lock.projects)) {
-    if (lock.projects[id].name || all.has(id)) continue;
-    const password = await ask(`Password of project ${id}, to show its name on the sign-in page (Enter to skip): `, true).catch(() => '');
+    const entry = lock.projects[id];
+    if ((entry.name && entry.admin) || all.has(id)) continue;
+    const password = await ask(
+      `Password of "${entry.name ?? id}", to list its name and let the admin reset its password (Enter to skip): `,
+      true,
+    ).catch(() => '');
     if (!password) continue;
     const key = await unlockProject(lock, id, password);
     if (key) all.set(id, key);
@@ -145,9 +178,11 @@ async function finishLock(lock: LockInfo, keys: ProjectKeys, names: Map<string, 
       console.log(`The sign-in page lists "${name}" (project names are public; everything inside stays encrypted).`);
     }
   }
-  if (!lock.admin) {
-    lock = await setAdminPassword(lock, await askAdminPassword(lock, true));
-    console.log('Admin password set.');
+  const noAdminCopy = [...all].filter(([id]) => lock.projects[id] && !lock.projects[id].admin);
+  const adminKey = noAdminCopy.length ? await adminKeyFor(lock, 'so it can reset forgotten project passwords') : null;
+  for (const [id, key] of adminKey ? noAdminCopy : []) {
+    lock = await addAdminCopy(lock, id, key, adminKey!);
+    console.log(`The admin password can now reset the password of "${lock.projects[id].name ?? id}".`);
   }
   return lock;
 }
@@ -283,8 +318,23 @@ async function encrypt() {
 
 async function changePassword() {
   const lock = readCurrentLock();
-  const opened = await unlockProjects(lock, await ask('Current password of the project: ', true));
-  if (!opened.size) throw new Error('That password does not open any project.');
+  const current = await ask('Current password of the project (Enter if forgotten, to use the admin password): ', true);
+  let opened: ProjectKeys;
+  if (current) {
+    opened = await unlockProjects(lock, current);
+    if (!opened.size) throw new Error('That password does not open any project.');
+  } else {
+    const adminKey = await adminKeyFor(lock, 'to reset a forgotten project password');
+    if (!adminKey) throw new Error('Without the project’s current password, the admin password is needed.');
+    const resettable = listProjects(lock).filter((p) => lock.projects[p.id].admin);
+    if (!resettable.length) throw new Error('No project has an admin copy of its key yet. Run `npm run lock` with the project passwords first.');
+    resettable.forEach((p, i) => console.log(`  ${i + 1}. ${p.name}`));
+    const n = resettable.length === 1 ? 1 : Number(await ask(`Which project gets a new password? (1-${resettable.length}) `));
+    const chosenId = resettable[n - 1]?.id;
+    const key = chosenId ? await recoverProjectKey(lock, chosenId, adminKey) : null;
+    if (!key) throw new Error('No such project.');
+    opened = new Map([[chosenId, key]]);
+  }
 
   const projects: { id: string; key: CryptoKey; ws: Workspace | null; name: string }[] = [];
   for (const [id, key] of opened) {
@@ -309,7 +359,10 @@ async function changePassword() {
   const password = await askUniquePassword(others, chosen.name);
 
   // A new data key too, so someone who kept the old key (not just the password) is locked out.
-  const { info, key } = await setProjectPassword(lock, chosen.id, password);
+  // The admin's copy is made again for the new key, if the admin password is at hand.
+  const adminKey = await adminKeyFor(lock, 'so it can still reset this project’s password later');
+  if (lock.admin && !adminKey) console.log('  Skipped: the admin password cannot reset this project’s password until `npm run lock` is run with it.');
+  const { info, key } = await setProjectPassword(lock, chosen.id, password, { adminKey: adminKey ?? undefined });
   if (chosen.ws) await writeProjectFile(dataDir, chosen.id, key, chosen.ws);
   for (const { f, bytes } of assets) fs.writeFileSync(f, await encryptBytes(key, bytes));
   fs.writeFileSync(path.join(dataDir, LOCK_FILE), JSON.stringify(info, null, 2) + '\n');
@@ -321,16 +374,20 @@ async function changePassword() {
 
 async function changeAdmin() {
   const lock = readCurrentLock();
+  let currentKey: CryptoKey | null = null;
   if (lock.admin) {
     const env = readPassword('LOGBOOK_ADMIN_PASSWORD');
-    let ok = !!env && !!(await unlockAdmin(lock, env));
-    for (let i = 0; !ok && i < 3; i++) {
-      ok = !!(await unlockAdmin(lock, await ask('Current admin password: ', true)));
-      if (!ok) console.log('  Wrong admin password.');
+    currentKey = env ? await unlockAdmin(lock, env) : null;
+    for (let i = 0; !currentKey && i < 3; i++) {
+      currentKey = await unlockAdmin(lock, await ask('Current admin password: ', true));
+      if (!currentKey) console.log('  Wrong admin password.');
     }
-    if (!ok) throw new Error('Wrong admin password. (If it is lost, delete the "admin" block from data/lock.json and run npm run lock.)');
+    if (!currentKey) {
+      throw new Error('Wrong admin password. (If it is lost, delete the "admin" block and every project\'s "admin" line from data/lock.json, then run npm run lock.)');
+    }
   }
-  const info = await setAdminPassword(lock, await askAdminPassword(lock, false));
+  // The admin's copies of the project keys move over to the new admin password.
+  const info = await setAdminPassword(lock, await askAdminPassword(lock, false), currentKey ?? undefined);
   fs.writeFileSync(path.join(dataDir, LOCK_FILE), JSON.stringify(info, null, 2) + '\n');
   console.log('Admin password changed. Update LOGBOOK_ADMIN_PASSWORD in .env.local if you keep it there, and commit data/lock.json.');
 }

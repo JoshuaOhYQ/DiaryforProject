@@ -5,8 +5,9 @@
  *   GET  /__logbook/ping              tells the app that file saving is available
  *   PUT  /__logbook/file/<path>       body = file contents -> data/<path>, for these paths only:
  *          logbook.json, assets/<name>                         a plain log book
- *          lock.json                                           a locked one: only adding a project (with the admin
- *                                                              key) or renaming one (with its key) is allowed
+ *          lock.json                                           a locked one: only adding a project or resetting its
+ *                                                              password (with the admin key), or renaming one
+ *                                                              (with its key) is allowed
  *          projects/<id>/logbook.json.enc,
  *          projects/<id>/assets/<name>.enc                     a locked project's files
  *
@@ -67,8 +68,9 @@ class Refused extends Error {
 }
 
 /**
- * A new lock.json may only add projects (with the admin key) or rename them (with that project's
- * key or the admin key). The salt, the admin password and every project's keys must stay as they are.
+ * A new lock.json may only add projects or reset a project's password (with the admin key), or rename
+ * a project (with that project's key or the admin key). The salt, the admin password and every
+ * project's data key (its check) must stay as they are, and no project may be removed.
  */
 async function checkLockUpdate(current: LockInfo, text: string, headers: IncomingMessage['headers']) {
   const header = async (name: string) => {
@@ -84,11 +86,13 @@ async function checkLockUpdate(current: LockInfo, text: string, headers: Incomin
   if (!isLockInfo(next) || next.salt !== current.salt || next.iterations !== current.iterations) throw new Refused(400, 'Not an update of data/lock.json');
   if (JSON.stringify(next.admin) !== JSON.stringify(current.admin)) throw new Refused(403, 'The admin password is changed with `npm run lock -- --admin`');
   const renamed: string[] = [];
+  const rekeyed: string[] = [];
   for (const [id, entry] of Object.entries(current.projects)) {
     const updated = next.projects[id];
-    if (updated?.key !== entry.key || updated.check !== entry.check) {
-      throw new Refused(403, 'Project passwords are changed or removed with `npm run lock`, not from the app');
+    if (!updated || updated.check !== entry.check) {
+      throw new Refused(403, 'Projects are removed, and their keys changed, with `npm run lock`, not from the app');
     }
+    if (updated.key !== entry.key || updated.admin !== entry.admin) rekeyed.push(id);
     if ((updated.name ?? '') !== (entry.name ?? '')) renamed.push(id);
   }
   const added = Object.keys(next.projects).filter((id) => !current.projects[id]);
@@ -98,7 +102,7 @@ async function checkLockUpdate(current: LockInfo, text: string, headers: Incomin
   }
   const adminKey = await header(ADMIN_HEADER);
   const isAdmin = !!adminKey && (await checkAdminKey(current, adminKey));
-  if (added.length && !isAdmin) {
+  if ((added.length || rekeyed.length) && !isAdmin) {
     throw new Refused(403, current.admin ? 'Wrong admin password' : 'No admin password is set yet. Run `npm run lock` to set one.');
   }
   if (renamed.length && !isAdmin) {

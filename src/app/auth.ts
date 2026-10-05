@@ -14,6 +14,7 @@ import {
   isLegacyLock,
   isLockInfo,
   LOCK_FILE,
+  recoverProjectKey,
   setProjectName,
   setProjectPassword,
   unlockAdmin,
@@ -121,11 +122,38 @@ export async function addProjectPassword(projectId: string, name: string, passwo
     if ((await unlockProjects(info, password)).size || (await unlockAdmin(info, password))) {
       throw new Error('That password is already used by another project or the admin. Choose a different one.');
     }
-    const next = await setProjectPassword(info, projectId, password, { name });
+    const next = await setProjectPassword(info, projectId, password, { name, adminKey });
     key = next.key;
     return next.info;
   }, { adminKey });
   await addToSession(new Map([[projectId, key!]]));
+}
+
+/**
+ * Reset a forgotten project password with the admin password, then sign in to that project. The
+ * project keeps its data key, so nothing has to be re-encrypted; only the old password stops working.
+ */
+export async function resetProjectPassword(lock: LockInfo, projectId: string, adminPassword: string, password: string): Promise<void> {
+  if (!lock.admin) throw new Error('No admin password is set yet. Run `npm run lock` in the repo to set one.');
+  const adminKey = await unlockAdmin(lock, adminPassword);
+  if (!adminKey) throw new Error('Wrong admin password.');
+  if (!lock.projects[projectId]?.admin) {
+    throw new Error('This project was made before admin resets existed. Run `npm run lock` with its password once to allow them.');
+  }
+  if (!getDataKeys()) setDataKeys(new Map()); // locked, with nothing open yet
+  await store.init();
+  if (!store.canWriteFiles) throw new Error('Open the app with `npm run dev` (or connect the data folder) to save the new password.');
+  let key: CryptoKey | null = null;
+  await store.updateLock(async (info) => {
+    const dataKey = await recoverProjectKey(info, projectId, adminKey);
+    if (!dataKey) throw new Error('The admin copy of this project’s key does not match. Run `npm run lock -- --password` in the repo.');
+    if ((await unlockProjects(info, password)).size || (await unlockAdmin(info, password))) {
+      throw new Error('That password is already used by another project or the admin. Choose a different one.');
+    }
+    key = dataKey;
+    return (await setProjectPassword(info, projectId, password, { dataKey })).info;
+  }, { adminKey });
+  await startSession(new Map([[projectId, key!]]), false);
 }
 
 /** Keep the name on the sign-in page in step with a renamed project. Quietly does nothing when data/ can't be written. */

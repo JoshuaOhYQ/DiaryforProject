@@ -47,7 +47,7 @@ public and giving someone one project's password shows them that project and not
    ```text
    LOGBOOK_PASSWORD_PIPER=the PIPER password
    LOGBOOK_PASSWORD_ROBOT_ARM=the robot arm password
-   LOGBOOK_ADMIN_PASSWORD=the admin password (only if you create projects)
+   LOGBOOK_ADMIN_PASSWORD=the admin password (only for the admin; it opens every project)
    ```
 
    Git ignores `.env.local`, so it is never committed. It lets Git merge teammates' entries; the
@@ -171,12 +171,14 @@ that device; the log-out button in the top bar forgets it and removes the log bo
 
 With `npm run lock` the log book is stored **encrypted** in the repo, so the code can be public
 on GitHub. **Every project has its own password**: share a project's password and that person can
-open that project only. Nobody, you included, has one password for everything. A separate **admin
-password** is needed to create projects; it opens none of them.
+open that project only. A separate **admin password** creates projects and resets forgotten
+project passwords. To make resets possible it can also open every project (see below), so keep it
+to as few people as possible.
 
 - `data/lock.json` holds a random salt, a check for the admin password and, for each project, its
-  name and its key locked with that project's password. It is not secret: **project names are
-  public** (the sign-in page lists them), everything inside a project is encrypted.
+  name and its key locked twice: with that project's password, and with the admin password. It is
+  not secret: **project names are public** (the sign-in page lists them), everything inside a
+  project is encrypted.
 - `data/projects/<id>/logbook.json.enc` and `data/projects/<id>/assets/*.enc` are each project's
   log book and screenshots, encrypted with that project's own key (AES-256-GCM; passwords are
   stretched with PBKDF2, 600 000 rounds). The project ids in the folder names are random and say
@@ -189,7 +191,16 @@ password** is needed to create projects; it opens none of them.
   `npm run dev` or a connected data folder, since it writes `data/lock.json`. The dev server refuses
   to add a project without the admin password. Renaming a project in Settings updates the name on
   the sign-in page the next time it is opened with `npm run dev`.
-- The admin password is a gate in the app and the dev server, not encryption: anyone who can push
+- **Forgot a project password?** On the sign-in page, *Forgot password?* asks for the project, the
+  admin password and a new password. The old password stops working; the project's entries stay
+  as they are (its key doesn't change, so nothing is re-encrypted). Like creating a project, this
+  needs `npm run dev` or a connected data folder. Projects made before resets existed need
+  `npm run lock` once, with their password, before the admin can reset them.
+- **The admin password is a master key.** Because it can reset any project's password, it can
+  also decrypt every project that has an admin copy of its key. Anyone who learns it can read the
+  whole log book from the public repo. Use a long, random one and change it
+  (`npm run lock -- --admin`) if it might have leaked.
+- Creating projects is a gate in the app and the dev server, not encryption: anyone who can push
   to the repo could edit `data/lock.json` by hand. Who can create projects is really decided by who
   has write access to the repo.
 - The app encrypts and decrypts in the browser, in `npm run dev`, on the deployed site and with a
@@ -208,14 +219,18 @@ Commands:
 - `npm run lock` encrypts whatever is not encrypted yet and asks (hidden typing) for a password for
   each project that has none. It sets the admin password if there is none yet: it uses
   `LOGBOOK_ADMIN_PASSWORD` from `.env.local` if that is there, or asks. It fills in project names
-  for the sign-in page (asking for the password of an unnamed project it can't open; press Enter to
-  skip). It also upgrades a log book locked the old way, with one password for everything, using
+  for the sign-in page and gives the admin a copy of each project's key, asking for the password of
+  any project it can't open (press Enter to skip). It also upgrades a log book locked the old way, with one password for everything, using
   `LOGBOOK_PASSWORD` from `.env.local`.
-- `npm run lock -- --password` changes one project's password: type the current one, then the new
-  one twice. The project gets a new key as well, so someone who saved the old key is locked out
-  too. Update `.env.local`, commit `data/` and give the new password to the people on that project.
-- `npm run lock -- --admin` changes the admin password (asks for the current one). If it is lost,
-  delete the `"admin"` block from `data/lock.json` and run `npm run lock` to set a new one.
+- `npm run lock -- --password` changes one project's password: type the current one (or press
+  Enter and use the admin password if it's forgotten), then the new one twice. Unlike the reset on
+  the sign-in page, the project also gets a new key, so someone who saved the old key is locked out
+  too: use this if a password leaked. Update `.env.local`, commit `data/` and give the new password
+  to the people on that project.
+- `npm run lock -- --admin` changes the admin password (asks for the current one); the admin copies
+  of the project keys move to the new password. If it is lost, delete the `"admin"` block and every
+  project's `"admin"` line from `data/lock.json`, then run `npm run lock` to set a new one (it asks
+  for the project passwords again to make new admin copies).
 - `npm run lock -- --decrypt` turns encryption off (asks for any project password it doesn't know).
 
 Things to know:

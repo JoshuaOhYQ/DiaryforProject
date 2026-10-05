@@ -5,7 +5,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Workspace } from '../src/types.ts';
-import { isLegacyLock, isLockInfo, LOCK_FILE, unlockProjects, type LegacyLockInfo, type LockInfo, type ProjectKeys } from '../src/lib/lock.ts';
+import {
+  isLegacyLock,
+  isLockInfo,
+  LOCK_FILE,
+  recoverProjectKey,
+  unlockAdmin,
+  unlockProjects,
+  type LegacyLockInfo,
+  type LockInfo,
+  type ProjectKeys,
+} from '../src/lib/lock.ts';
 import { openWorkspaceText, projectWorkspacePath, sealWorkspaceText, WORKSPACE_FILE } from '../src/data/sealed.ts';
 import { serializeWorkspace } from '../src/data/workspace.ts';
 
@@ -60,10 +70,20 @@ export function readCurrentLock(dir = dataDir): LockInfo {
   return info;
 }
 
-/** The data keys of every project that a password in the environment / .env.local opens. */
+/**
+ * The data keys of every project that a password in the environment / .env.local opens, including
+ * the projects LOGBOOK_ADMIN_PASSWORD can open through the admin's copies.
+ */
 export async function knownProjectKeys(info: LockInfo, passwords = readPasswords()): Promise<ProjectKeys> {
   const keys: ProjectKeys = new Map();
   for (const password of passwords) for (const [id, key] of await unlockProjects(info, password)) keys.set(id, key);
+  const adminPassword = readPassword('LOGBOOK_ADMIN_PASSWORD');
+  const adminKey = adminPassword ? await unlockAdmin(info, adminPassword) : null;
+  for (const id of adminKey ? Object.keys(info.projects) : []) {
+    if (keys.has(id)) continue;
+    const key = await recoverProjectKey(info, id, adminKey!);
+    if (key) keys.set(id, key);
+  }
   return keys;
 }
 

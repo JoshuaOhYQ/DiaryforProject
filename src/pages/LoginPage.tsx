@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowLeft, FolderOpen, LockKeyhole, NotebookPen, Plus } from 'lucide-react';
-import { startSession } from '../app/auth.ts';
+import { ArrowLeft, FolderOpen, KeyRound, LockKeyhole, NotebookPen, Plus } from 'lucide-react';
+import { resetProjectPassword, startSession } from '../app/auth.ts';
 import { cannotSaveNewProject, createLockedProject } from '../app/projects.ts';
 import { getDataKeys, setDataKeys, store, useSaveStatus } from '../data/index.ts';
 import { PasswordField } from '../components/PasswordField.tsx';
@@ -13,19 +13,36 @@ const MIN_PASSWORD = 8;
 
 /**
  * Shown before anything else on a password-protected log book: choose a project and type its
- * password, or create a new project with the admin password.
+ * password, create a new project, or reset a forgotten project password (both need the admin password).
  */
 export function LoginPage({ lock, onUnlocked }: { lock: LockInfo; onUnlocked: () => void }) {
-  const [mode, setMode] = useState<'sign-in' | 'create'>(Object.keys(lock.projects).length ? 'sign-in' : 'create');
+  const hasProjects = Object.keys(lock.projects).length > 0;
+  const [mode, setMode] = useState<'sign-in' | 'create' | 'reset'>(hasProjects ? 'sign-in' : 'create');
+  const [projectId, setProjectId] = useState(() => initialProject(lock));
+  const back = () => setMode('sign-in');
   return (
     <div className={`login ${mode === 'create' ? 'wide' : ''}`}>
-      {mode === 'sign-in' ? (
-        <SignIn lock={lock} onUnlocked={onUnlocked} onCreate={() => setMode('create')} />
-      ) : (
-        <CreateProject lock={lock} onCreated={onUnlocked} onBack={Object.keys(lock.projects).length ? () => setMode('sign-in') : undefined} />
+      {mode === 'sign-in' && (
+        <SignIn
+          lock={lock}
+          projectId={projectId}
+          onProject={setProjectId}
+          onUnlocked={onUnlocked}
+          onCreate={() => setMode('create')}
+          onForgot={() => setMode('reset')}
+        />
       )}
+      {mode === 'create' && <CreateProject lock={lock} onCreated={onUnlocked} onBack={hasProjects ? back : undefined} />}
+      {mode === 'reset' && <ResetPassword lock={lock} projectId={projectId} onProject={setProjectId} onBack={back} />}
     </div>
   );
+}
+
+/** The project used last on this device, or the only one. */
+function initialProject(lock: LockInfo): string {
+  const projects = listProjects(lock);
+  const last = getPref<string | null>('project', null);
+  return projects.find((p) => p.id === last)?.id ?? (projects.length === 1 ? projects[0].id : '');
 }
 
 function Brand({ subtitle }: { subtitle: string }) {
@@ -44,10 +61,17 @@ function Brand({ subtitle }: { subtitle: string }) {
   );
 }
 
-function SignIn({ lock, onUnlocked, onCreate }: { lock: LockInfo; onUnlocked: () => void; onCreate: () => void }) {
+interface SignInProps {
+  lock: LockInfo;
+  projectId: string;
+  onProject: (id: string) => void;
+  onUnlocked: () => void;
+  onCreate: () => void;
+  onForgot: () => void;
+}
+
+function SignIn({ lock, projectId, onProject, onUnlocked, onCreate, onForgot }: SignInProps) {
   const projects = listProjects(lock);
-  const last = getPref<string | null>('project', null);
-  const [projectId, setProjectId] = useState(() => projects.find((p) => p.id === last)?.id ?? (projects.length === 1 ? projects[0].id : ''));
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -74,7 +98,7 @@ function SignIn({ lock, onUnlocked, onCreate }: { lock: LockInfo; onUnlocked: ()
   return (
     <form className="card card-pad stack" onSubmit={submit}>
       <Brand subtitle="Choose your project and enter its password" />
-      <ProjectSelect id="login-project" projects={projects} value={projectId} onChange={(id) => (setProjectId(id), setError(null))} />
+      <ProjectSelect id="login-project" projects={projects} value={projectId} onChange={(id) => (onProject(id), setError(null))} />
       <PasswordField id="login-password" label="Password" value={password} onChange={setPassword} autoComplete="current-password" autoFocus={!!projectId} error={error} />
       <label className="row small">
         <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
@@ -84,9 +108,65 @@ function SignIn({ lock, onUnlocked, onCreate }: { lock: LockInfo; onUnlocked: ()
         <LockKeyhole size={16} /> {busy ? 'Checking…' : 'Sign in'}
       </button>
       <div className="login-footer">
-        <span className="small muted">Starting something new?</span>
+        <button type="button" className="btn ghost small" onClick={onForgot}>
+          <KeyRound size={15} /> Forgot password?
+        </button>
         <button type="button" className="btn ghost small" onClick={onCreate}>
           <Plus size={15} /> Create a project
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ResetPassword({ lock, projectId, onProject, onBack }: { lock: LockInfo; projectId: string; onProject: (id: string) => void; onBack: () => void }) {
+  const projects = listProjects(lock);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy || !projectId) return;
+    if (password.length < MIN_PASSWORD) return setError(`Use at least ${MIN_PASSWORD} characters for the new password.`);
+    if (password !== confirm) return setError('The two new passwords are different.');
+    setBusy(true);
+    setError(null);
+    try {
+      await resetProjectPassword(lock, projectId, adminPassword, password);
+      setPref('project', projectId);
+      location.reload(); // signed in to the project; start again from the files
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="card card-pad stack" onSubmit={submit}>
+      <Brand subtitle="Reset a project password (admin only)" />
+      <p className="small muted" style={{ margin: 0 }}>
+        An admin can give a project a new password. The old one stops working; the project’s entries stay as they are.
+      </p>
+      <ProjectSelect id="reset-project" projects={projects} value={projectId} onChange={(id) => (onProject(id), setError(null))} />
+      <PasswordField id="reset-admin" label="Admin password" value={adminPassword} onChange={setAdminPassword} autoComplete="current-password" autoFocus />
+      <PasswordField
+        id="reset-password"
+        label="New password for this project"
+        value={password}
+        onChange={setPassword}
+        autoComplete="new-password"
+        hint="Give it to the people on this project. Use a long, random one."
+      />
+      <PasswordField id="reset-confirm" label="Type it again" value={confirm} onChange={setConfirm} autoComplete="new-password" error={error} />
+      <button className="btn primary" type="submit" disabled={busy || !projectId || !adminPassword || !password || !confirm}>
+        <KeyRound size={16} /> {busy ? 'Resetting…' : 'Reset password'}
+      </button>
+      <div className="login-footer">
+        <button type="button" className="btn ghost small" onClick={onBack}>
+          <ArrowLeft size={15} /> Back to sign-in
         </button>
       </div>
     </form>
@@ -176,7 +256,7 @@ function CreateProject({ lock, onCreated, onBack }: { lock: LockInfo; onCreated:
           onChange={setAdminPassword}
           autoComplete="current-password"
           autoFocus
-          hint="Only admins can create projects. It does not open any project."
+          hint="Only admins can create projects."
         />
         <div className="field">
           <label htmlFor="create-name">Project name</label>
