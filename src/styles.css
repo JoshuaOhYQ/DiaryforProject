@@ -711,6 +711,23 @@ main.wide {
 .btn.danger:hover {
   background: var(--danger-soft);
 }
+.btn.danger-solid {
+  border-color: transparent;
+  background: var(--danger);
+  color: #fff;
+}
+.btn.danger-solid:hover {
+  filter: brightness(1.1);
+}
+.btn.danger-solid:disabled {
+  filter: none;
+}
+.danger-zone {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.danger-zone h2 {
+  color: var(--danger);
+}
 .btn.ghost {
   border-color: transparent;
   background: transparent;

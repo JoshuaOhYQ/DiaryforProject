@@ -34,6 +34,7 @@ function memoryTarget(initial: string | null = null) {
       return null;
     },
     async writeLock() {},
+    async removeProject() {},
   };
   return { target, files };
 }

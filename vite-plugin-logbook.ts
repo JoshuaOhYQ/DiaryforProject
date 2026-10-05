@@ -5,9 +5,10 @@
  *   GET  /__logbook/ping              tells the app that file saving is available
  *   PUT  /__logbook/file/<path>       body = file contents -> data/<path>, for these paths only:
  *          logbook.json, assets/<name>                         a plain log book
- *          lock.json                                           a locked one: only adding a project or resetting its
- *                                                              password (with the admin key), or renaming one
- *                                                              (with its key) is allowed
+ *          lock.json                                           a locked one: only adding, removing or resetting the
+ *                                                              password of a project (with the admin key), or
+ *                                                              renaming one (with its key) is allowed
+ *   DELETE /__logbook/file/projects/<id>  delete a project's folder, once it is no longer in lock.json
  *          projects/<id>/logbook.json.enc,
  *          projects/<id>/assets/<name>.enc                     a locked project's files
  *
@@ -68,9 +69,9 @@ class Refused extends Error {
 }
 
 /**
- * A new lock.json may only add projects or reset a project's password (with the admin key), or rename
- * a project (with that project's key or the admin key). The salt, the admin password and every
- * project's data key (its check) must stay as they are, and no project may be removed.
+ * A new lock.json may only add or remove projects or reset a project's password (with the admin key),
+ * or rename a project (with that project's key or the admin key). The salt, the admin password and
+ * every remaining project's data key (its check) must stay as they are.
  */
 async function checkLockUpdate(current: LockInfo, text: string, headers: IncomingMessage['headers']) {
   const header = async (name: string) => {
@@ -86,12 +87,14 @@ async function checkLockUpdate(current: LockInfo, text: string, headers: Incomin
   if (!isLockInfo(next) || next.salt !== current.salt || next.iterations !== current.iterations) throw new Refused(400, 'Not an update of data/lock.json');
   if (JSON.stringify(next.admin) !== JSON.stringify(current.admin)) throw new Refused(403, 'The admin password is changed with `npm run lock -- --admin`');
   const renamed: string[] = [];
-  const rekeyed: string[] = [];
+  const rekeyed: string[] = []; // password reset or project removed: admin only
   for (const [id, entry] of Object.entries(current.projects)) {
     const updated = next.projects[id];
-    if (!updated || updated.check !== entry.check) {
-      throw new Refused(403, 'Projects are removed, and their keys changed, with `npm run lock`, not from the app');
+    if (!updated) {
+      rekeyed.push(id);
+      continue;
     }
+    if (updated.check !== entry.check) throw new Refused(403, 'A project’s key is changed with `npm run lock -- --password`, not from the app');
     if (updated.key !== entry.key || updated.admin !== entry.admin) rekeyed.push(id);
     if ((updated.name ?? '') !== (entry.name ?? '')) renamed.push(id);
   }
@@ -209,6 +212,21 @@ export function logbookFiles(options: Options = {}): Plugin {
 
         if (req.method === 'GET' && pathname === '/__logbook/ping') {
           return send(res, 200, { ok: true, dataDir: path.relative(root, dataDir) || '.' });
+        }
+
+        if (req.method === 'DELETE' && pathname.startsWith(FILE_ROUTE)) {
+          // Only a project's folder, and only once the project is off lock.json (which needed its key).
+          const [dir, id, ...rest] = pathname.slice(FILE_ROUTE.length).split('/');
+          if (dir !== PROJECTS_DIR || !SAFE_NAME.test(id ?? '') || rest.length) return send(res, 400, { error: 'Only a project folder can be deleted' });
+          let lock: LockInfo;
+          try {
+            lock = readCurrentLock(dataDir);
+          } catch (e) {
+            return send(res, 409, { error: (e as Error).message });
+          }
+          if (lock.projects[id]) return send(res, 403, { error: 'Delete the project from lock.json first' });
+          fs.rmSync(path.join(dataDir, PROJECTS_DIR, id), { recursive: true, force: true });
+          return send(res, 200, { ok: true });
         }
 
         if (req.method === 'PUT' && pathname.startsWith(FILE_ROUTE)) {

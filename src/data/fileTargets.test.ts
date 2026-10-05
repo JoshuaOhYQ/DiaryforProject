@@ -27,6 +27,9 @@ function memoryFiles() {
       files.set(file, blob);
       writes.push(file);
     },
+    async removeDir(dir) {
+      for (const file of [...files.keys()]) if (file.startsWith(`${dir}/`)) files.delete(file);
+    },
   };
   return { files, writes, raw };
 }
@@ -101,5 +104,15 @@ describe('locked file target', () => {
     await codec(raw, () => keys).writeWorkspace(serializeWorkspace(deleted));
     const bravo = parseWorkspace(await openWorkspaceText(keys.get(b.id)!, files.get(projectWorkspacePath(b.id)) as string));
     expect(bravo.tombstones).toEqual([]);
+  });
+
+  it("removes a deleted project's folder and nothing else", async () => {
+    const { a, b, ws, keys } = await twoProjects();
+    const { files, raw } = memoryFiles();
+    const target = codec(raw, () => keys);
+    await target.writeWorkspace(serializeWorkspace(ws));
+    await target.writeAsset('assets/x.png', new Blob(['png']), a.id);
+    await target.removeProject(a.id);
+    expect([...files.keys()]).toEqual([projectWorkspacePath(b.id)]);
   });
 });

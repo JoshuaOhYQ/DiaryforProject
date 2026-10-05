@@ -191,6 +191,10 @@ to as few people as possible.
   `npm run dev` or a connected data folder, since it writes `data/lock.json`. The dev server refuses
   to add a project without the admin password. Renaming a project in Settings updates the name on
   the sign-in page the next time it is opened with `npm run dev`.
+- **Deleting a project** (admin only): Settings → *Delete this project* (or *Delete* next to it in
+  the project list), then enter the admin password. It also comes off the sign-in page and its
+  encrypted folder is removed. This needs `npm run dev` or a connected data folder; the dev server
+  refuses to remove a project without the admin password. Older Git commits still have it.
 - **Forgot a project password?** On the sign-in page, *Forgot password?* asks for the project, the
   admin password and a new password. The old password stops working; the project's entries stay
   as they are (its key doesn't change, so nothing is re-encrypted). Like creating a project, this

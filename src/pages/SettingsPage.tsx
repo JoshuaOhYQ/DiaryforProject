@@ -3,10 +3,10 @@ import { Check, Download, FileUp, Plus, Trash2 } from 'lucide-react';
 import type { Project } from '../types.ts';
 import { useAppActions, useProject } from '../app/context.ts';
 import { isLockedSite } from '../app/auth.ts';
-import { deleteProject } from '../app/projects.ts';
 import { toast } from '../app/toast.tsx';
 import { DEFAULT_ENTRY_TYPES, store, useWorkspace } from '../data/index.ts';
 import { BackupButtons, SaveTargetPanel } from '../components/BackupControls.tsx';
+import { DeleteProjectDialog } from '../components/DeleteProjectDialog.tsx';
 import { ImportDialog } from '../components/ImportDialog.tsx';
 import { entriesToCsv } from '../lib/csv.ts';
 import { downloadText, safeFileName } from '../lib/files.ts';
@@ -17,6 +17,7 @@ export function SettingsPage() {
   const ws = useWorkspace();
   const actions = useAppActions();
   const [importing, setImporting] = useState(false);
+  const [deleting, setDeleting] = useState<Project | null>(null);
 
   return (
     <>
@@ -82,17 +83,8 @@ export function SettingsPage() {
                       Open
                     </button>
                   )}
-                  <button
-                    className="btn small ghost danger"
-                    aria-label={`Delete ${p.name}`}
-                    onClick={() => {
-                      const typed = prompt(`This deletes "${p.name}" with all ${entries} entries, its tasks and team.\n\nType the project name to confirm:`);
-                      if (typed?.trim() !== p.name.trim()) return;
-                      deleteProject(ws, p.id);
-                      toast('Project deleted');
-                    }}
-                  >
-                    <Trash2 size={15} />
+                  <button className="btn small danger" aria-label={`Delete ${p.name}`} onClick={() => setDeleting(p)}>
+                    <Trash2 size={15} /> Delete
                   </button>
                 </div>
               );
@@ -105,10 +97,24 @@ export function SettingsPage() {
               </p>
             )}
           </section>
+
+          <section className="card card-pad danger-zone">
+            <h2>Delete this project</h2>
+            <p className="small muted">
+              Removes “{data.project.name}” with all its entries, tasks, team and log book pages
+              {isLockedSite() ? ', and takes it off the sign-in page. Only an admin can do this (admin password needed).' : '. You’ll be asked to type its name to confirm.'}
+            </p>
+            <div className="row">
+              <button className="btn danger-solid" onClick={() => setDeleting(data.project)}>
+                <Trash2 size={16} /> Delete project…
+              </button>
+            </div>
+          </section>
         </div>
       </div>
 
       {importing && <ImportDialog onClose={() => setImporting(false)} />}
+      {deleting && <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} />}
     </>
   );
 }

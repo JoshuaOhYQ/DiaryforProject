@@ -8,6 +8,7 @@
  */
 import { getDataKeys, setDataKeys, store } from '../data/index.ts';
 import {
+  checkAdminKey,
   checkProjectKey,
   exportKey,
   importKey,
@@ -15,6 +16,7 @@ import {
   isLockInfo,
   LOCK_FILE,
   recoverProjectKey,
+  removeProject,
   setProjectName,
   setProjectPassword,
   unlockAdmin,
@@ -154,6 +156,28 @@ export async function resetProjectPassword(lock: LockInfo, projectId: string, ad
     return (await setProjectPassword(info, projectId, password, { dataKey })).info;
   }, { adminKey });
   await startSession(new Map([[projectId, key!]]), false);
+}
+
+/**
+ * Delete a project from a locked log book for good (admin only): off data/lock.json (so off the
+ * sign-in page), out of this session, and its encrypted folder removed.
+ */
+export async function removeLockedProject(projectId: string, adminPassword: string): Promise<void> {
+  const lock = await loadLock();
+  if (!lock || lock === 'outdated') throw new Error('data/lock.json is missing or out of date. Run `npm run lock` in the repo.');
+  if (!lock.admin) throw new Error('No admin password is set yet. Run `npm run lock` in the repo to set one.');
+  const adminKey = await unlockAdmin(lock, adminPassword);
+  if (!adminKey) throw new Error('Wrong admin password.');
+  if (!store.canWriteFiles) throw new Error('Open the app with `npm run dev` (or connect the data folder) to delete a project.');
+  await store.updateLock(async (info) => {
+    // Checked against the copy being changed too, in case the admin password changed meanwhile.
+    if (!(await checkAdminKey(info, adminKey))) throw new Error('Wrong admin password.');
+    return removeProject(info, projectId);
+  }, { adminKey });
+  const keys = new Map(getDataKeys());
+  keys.delete(projectId);
+  await saveKeys(keys, isRemembered());
+  await store.removeProjectFiles(projectId);
 }
 
 /** Keep the name on the sign-in page in step with a renamed project. Quietly does nothing when data/ can't be written. */

@@ -2,7 +2,7 @@
 import type { CollectionName, Project, Workspace } from '../types.ts';
 import { getDataKeys, setDataKeys, store, type ProjectData } from '../data/index.ts';
 import { unlockAdmin, type LockInfo } from '../lib/lock.ts';
-import { addProjectPassword } from './auth.ts';
+import { addProjectPassword, isLockedSite, removeLockedProject } from './auth.ts';
 import { instantiateTemplate, type ProjectTemplate } from '../templates/index.ts';
 
 export function createProject(template: ProjectTemplate, overrides: Partial<Project> = {}): string {
@@ -69,7 +69,13 @@ export function templateFromProject(data: ProjectData): ProjectTemplate {
   };
 }
 
-export function deleteProject(ws: Workspace, projectId: string): void {
+/**
+ * Delete a project with all its records. On a locked log book only an admin can (pass the admin
+ * password): it is also taken off the sign-in page and its encrypted folder is removed. That part
+ * runs first, so a failure deletes nothing.
+ */
+export async function deleteProject(ws: Workspace, projectId: string, adminPassword = ''): Promise<void> {
+  if (isLockedSite()) await removeLockedProject(projectId, adminPassword);
   const del: { collection: CollectionName; id: string }[] = [{ collection: 'projects', id: projectId }];
   for (const c of ['members', 'features', 'tasks', 'entries', 'weekNotes'] as const) {
     for (const r of ws[c]) if (r.projectId === projectId) del.push({ collection: c, id: r.id });

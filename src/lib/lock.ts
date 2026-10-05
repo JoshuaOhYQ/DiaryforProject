@@ -193,6 +193,12 @@ export async function recoverProjectKey(info: LockInfo, projectId: string, admin
   }
 }
 
+/** Take a deleted project off the lock (and so off the sign-in page). */
+export function removeProject(info: LockInfo, projectId: string): LockInfo {
+  const { [projectId]: _removed, ...projects } = info.projects;
+  return { ...info, projects };
+}
+
 /** Change the name shown on the sign-in page. */
 export function setProjectName(info: LockInfo, projectId: string, name: string): LockInfo {
   const entry = info.projects[projectId];

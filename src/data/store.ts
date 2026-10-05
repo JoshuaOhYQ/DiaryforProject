@@ -396,6 +396,12 @@ export class LogbookStore {
     if (JSON.stringify(next) !== JSON.stringify(info)) await target.writeLock(next, proof);
   }
 
+  /** Delete a project's folder in data/ (a locked log book, after it was taken off lock.json). */
+  async removeProjectFiles(projectId: string): Promise<void> {
+    if (!this.target?.writable) throw new Error('Run `npm run dev` or connect the data folder first.');
+    await this.target.removeProject(projectId);
+  }
+
   /** Save what is pending, then remove the log book from this browser (used when logging out). */
   async clearLocalCopy(): Promise<void> {
     await this.flush().catch(() => undefined);

@@ -23,7 +23,7 @@ import {
   type ProjectKeys,
 } from '../lib/lock.ts';
 import { mergeWorkspaces, parseLogbookText } from './merge.ts';
-import { mimeForAsset, openWorkspaceText, projectAssetPath, projectWorkspacePath, sealWorkspaceText, WORKSPACE_FILE } from './sealed.ts';
+import { mimeForAsset, openWorkspaceText, PROJECTS_DIR, projectAssetPath, projectWorkspacePath, sealWorkspaceText, WORKSPACE_FILE } from './sealed.ts';
 import { parseWorkspace, projectIdsIn, projectSlice, restrictWorkspace, serializeWorkspace } from './workspace.ts';
 
 export type TargetKind = 'dev-server' | 'folder' | 'static';
@@ -40,8 +40,10 @@ export interface FileTarget {
   writeAsset(file: string, blob: Blob, projectId: string): Promise<void>;
   /** data/lock.json, or null when the log book is not locked. */
   readLock(): Promise<LockInfo | null>;
-  /** The dev server needs the admin key to add a project, and the project's key to rename it. */
+  /** The dev server needs the admin key to add a project, and the project's key to rename or remove it. */
   writeLock(info: LockInfo, proof?: LockProof): Promise<void>;
+  /** Delete data/projects/<id>/ (only once the project is off lock.json). */
+  removeProject(projectId: string): Promise<void>;
 }
 
 const base = () => import.meta.env.BASE_URL ?? '/';
@@ -74,9 +76,11 @@ export interface RawFiles {
   readBlob(file: string): Promise<Blob | null>;
   writeText(file: string, text: string, headers?: Record<string, string>): Promise<void>;
   writeBlob(file: string, blob: Blob): Promise<void>;
+  /** Delete a folder inside data/ and everything in it. */
+  removeDir(dir: string): Promise<void>;
 }
 
-type Codec = Pick<FileTarget, 'readWorkspace' | 'writeWorkspace' | 'readAsset' | 'writeAsset' | 'readLock' | 'writeLock'>;
+type Codec = Pick<FileTarget, 'readWorkspace' | 'writeWorkspace' | 'readAsset' | 'writeAsset' | 'readLock' | 'writeLock' | 'removeProject'>;
 
 /**
  * The workspace and asset methods of a target. When the log book is locked, the workspace is
@@ -146,18 +150,24 @@ export function codec(raw: RawFiles, keys: () => ProjectKeys | null = () => data
       if (proof.projectKey) headers[PROJECT_HEADER] = await exportKey(proof.projectKey);
       await raw.writeText(LOCK_FILE, JSON.stringify(info, null, 2) + '\n', headers);
     },
+    async removeProject(projectId) {
+      await raw.removeDir(`${PROJECTS_DIR}/${projectId}`);
+    },
   };
 }
 
 /** The label shown for a target writing into `dir`. */
 const targetLabel = (dir: string) => (dataKeys ? `${dir}/projects` : `${dir}/${WORKSPACE_FILE}`);
 
-function readOnly(): Pick<RawFiles, 'writeText' | 'writeBlob'> {
+function readOnly(): Pick<RawFiles, 'writeText' | 'writeBlob' | 'removeDir'> {
   return {
     async writeText() {
       throw new Error('Read-only');
     },
     async writeBlob() {
+      throw new Error('Read-only');
+    },
+    async removeDir() {
       throw new Error('Read-only');
     },
   };
@@ -184,20 +194,25 @@ export async function detectDevServer(): Promise<FileTarget | null> {
   const info = (await res.json().catch(() => null)) as { ok?: boolean; dataDir?: string } | null;
   if (!info?.ok) return null;
   const dir = info.dataDir ?? 'data';
-  const put = async (file: string, body: BodyInit, headers?: Record<string, string>) => {
-    const res = await fetch(`${base()}__logbook/file/${file.split('/').map(encodeURIComponent).join('/')}`, { method: 'PUT', body, headers });
+  const send = async (method: 'PUT' | 'DELETE', file: string, body?: BodyInit, headers?: Record<string, string>) => {
+    const res = await fetch(`${base()}__logbook/file/${file.split('/').map(encodeURIComponent).join('/')}`, { method, body, headers });
     if (res.ok) return;
     const reason = await res
       .json()
       .then((j: { error?: string }) => j.error)
       .catch(() => null);
-    throw new Error(`Could not write ${dir}/${file} (${reason ?? res.status})`);
+    throw new Error(`Could not ${method === 'PUT' ? 'write' : 'delete'} ${dir}/${file} (${reason ?? res.status})`);
   };
   return {
     kind: 'dev-server',
     label: targetLabel(dir),
     writable: true,
-    ...codec({ ...fetchReads, writeText: put, writeBlob: (file, blob) => put(file, blob) }),
+    ...codec({
+      ...fetchReads,
+      writeText: (file, text, headers) => send('PUT', file, text, headers),
+      writeBlob: (file, blob) => send('PUT', file, blob),
+      removeDir: (path) => send('DELETE', path),
+    }),
   };
 }
 
@@ -270,6 +285,14 @@ export function folderTarget(dir: FileSystemDirectoryHandle): FileTarget {
       readBlob: read,
       writeText: write,
       writeBlob: write,
+      async removeDir(path) {
+        try {
+          const { folder, name } = await locate(path, false);
+          await folder.removeEntry(name, { recursive: true });
+        } catch (e) {
+          if ((e as Error).name !== 'NotFoundError') throw e; // already gone
+        }
+      },
     }),
   };
 }
